@@ -1,0 +1,32 @@
+{
+  "history_end": "2026-11-01",
+  "first_week": "2026-06-01",
+  "weeks": 22,
+  "series": [
+    {
+      "series_id": 1042,
+      "segment": "stock_managed_short_stockout",
+      "note": "Held in stock, sells most weeks, two weeks of stockout in the middle."
+    },
+    {
+      "series_id": 1198,
+      "segment": "made_to_order",
+      "note": "Sold without being held in stock: every selling week opens at zero."
+    },
+    {
+      "series_id": 1255,
+      "segment": "out_of_assortment",
+      "note": "Fifteen consecutive weeks without stock: longer than the 13-week threshold."
+    },
+    {
+      "series_id": 1403,
+      "segment": "not_classifiable",
+      "note": "Recently stocked product-warehouse: too few selling weeks to classify."
+    },
+    {
+      "series_id": 1500,
+      "segment": "invalid_negative_quantity",
+      "note": "A reversal Core failed to net out: demand is gross and cannot be negative."
+    }
+  ]
+}
