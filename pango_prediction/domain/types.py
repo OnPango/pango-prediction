@@ -59,6 +59,25 @@ class AvailabilityState(StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
+class StockHandling(StrEnum):
+    """How a series is supplied, inferred from its own history (notebook S24).
+
+    STOCK_MANAGED
+        The product is normally held in stock, so a week without sales and
+        without stock can be read as a stockout.
+    MADE_TO_ORDER
+        The product sells without being held in stock, so zero stock is its
+        normal state and says nothing about demand.
+    NOT_CLASSIFIABLE
+        There are too few weeks with both a sale and a known opening balance to
+        decide, so no week of the series can be evaluated for censoring.
+    """
+
+    STOCK_MANAGED = "STOCK_MANAGED"
+    MADE_TO_ORDER = "MADE_TO_ORDER"
+    NOT_CLASSIFIABLE = "NOT_CLASSIFIABLE"
+
+
 @dataclass(frozen=True, slots=True)
 class WeeklyAvailability:
     """Availability of a weekly series, aligned to ``RegularizedSeries.dates``.
@@ -67,6 +86,8 @@ class WeeklyAvailability:
     read as real demand, which is the same set of weeks the notebook drops from
     the model series. ``closing_stock`` keeps the resolved weekly balance for
     traceability, with ``None`` where no stock information was available.
+    ``stock_handling`` records why the series was, or was not, evaluated for
+    censoring; the demand profile needs it too.
     """
 
     series_id: str
@@ -74,6 +95,7 @@ class WeeklyAvailability:
     states: tuple[AvailabilityState, ...]
     available_mask: tuple[bool, ...]
     closing_stock: tuple[float | None, ...]
+    stock_handling: StockHandling
 
 
 @dataclass(frozen=True, slots=True)

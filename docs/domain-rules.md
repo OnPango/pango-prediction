@@ -217,9 +217,9 @@ The rule was not assumed, it was tested:
 | Partial censoring | 4,194 |
 | Masked in the final model series | 25,559 (4.5 %) |
 
-**Implemented:** `build_weekly_availability(series, stock)` in `pango_prediction/domain/availability.py`, except the S24 gate below.
+**Implemented:** `build_weekly_availability(series, stock)` in `pango_prediction/domain/availability.py`.
 
-### Stock handling — made-to-order (S24) — NOT YET IMPLEMENTED
+### Stock handling — made-to-order (S24)
 
 The notebook **does** define the made-to-order rule, derived from history rather than received as a flag:
 
@@ -236,10 +236,13 @@ MIN_SEM_DATO  = 4     # fewer weeks with stock data -> cannot classify
 
 Moving the threshold to 25 % or 75 % only moves 3.7 % of units. A `bajo_pedido` or `sin_dato` series is **not evaluated for censoring** at all.
 
-**Two consequences:**
+The opening balance of a week is the previous week's closing — the notebook's `shift()` on the stock column. Only weeks that both sold and have a known opening balance count towards the decision, and `sin_dato` takes precedence over `bajo_pedido`, because the notebook applies that assignment last.
 
-1. `contract-v1.md` carries `metadata.made_to_order` as a boolean sent by Pango Core. The tenant schema has **no such column** on `products` or `product_warehouses`, and the notebook computes it from history. The field should be removed from the contract.
-2. Until this gate exists in code, production treats every series as `con_stock`, so a made-to-order series will be labelled `CENSORED` where the notebook would leave it unevaluated.
+Where a stock-managed series would be `CENSORED`, a `bajo_pedido` or `sin_dato` series is `UNKNOWN` instead: zero stock is either the product's normal operating state or a situation that cannot be read, so the week says nothing about demand. The mask is unaffected, which keeps parity with the notebook.
+
+**Consequence for the contract:** `contract-v1.md` carries `metadata.made_to_order` as a boolean sent by Pango Core. The tenant schema has **no such column** on `products` or `product_warehouses`, and the notebook computes it from history. The field should be removed from the contract.
+
+**Implemented:** `classify_stock_handling(series, stock)` in `pango_prediction/domain/availability.py`, and exposed on the result as `WeeklyAvailability.stock_handling` because the demand profile needs it too.
 
 ---
 
@@ -401,8 +404,8 @@ likelihood: NegativeBinomial
 | Horizon | 4 weeks | 8.2 | not yet |
 | Stock tolerance | `1e-6` | notebook `TOL` | `STOCK_TOLERANCE` |
 | Max stockout episode | 13 weeks | S26 | `MAX_STOCKOUT_EPISODE_WEEKS` |
-| Made-to-order threshold | 0.5 | S24 | not yet |
-| Min weeks with stock data | 4 | S24 | not yet |
+| Made-to-order threshold | 0.5 | S24 | `MADE_TO_ORDER_THRESHOLD` |
+| Min weeks with stock data | 4 | S24 | `MIN_WEEKS_WITH_STOCK_DATA` |
 | Inactivity window | 26 weeks | 7.5 | not yet |
 | New product | ≤ 13 weeks | E5 | not yet |
 | Limited history | 14–52 weeks | E5 | not yet |
