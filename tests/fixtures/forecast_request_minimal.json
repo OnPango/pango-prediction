@@ -1,0 +1,246 @@
+{
+  "contract_version": "1.0",
+  "request_id": "req-2026-11-02-0002",
+  "forecast_run_id": 42,
+  "frequency": "WEEKLY",
+  "horizon": 4,
+  "history_end": "2026-11-01",
+  "calendar": {
+    "closed_dates": []
+  },
+  "series": [
+    {
+      "series_id": 1042,
+      "product_id": 318,
+      "warehouse_id": 1,
+      "metadata": {
+        "sku": "TAL-4512",
+        "category": "Herramienta manual",
+        "stock_unit": "UN",
+        "warehouse_code": "PRINCIPAL",
+        "warehouse_type": "WAREHOUSE",
+        "lead_time_days": 5
+      },
+      "demand": [
+        {
+          "date": "2026-06-02",
+          "quantity": 2
+        },
+        {
+          "date": "2026-06-06",
+          "quantity": 2
+        },
+        {
+          "date": "2026-06-09",
+          "quantity": 3
+        },
+        {
+          "date": "2026-06-13",
+          "quantity": 2
+        },
+        {
+          "date": "2026-06-16",
+          "quantity": 2
+        },
+        {
+          "date": "2026-06-20",
+          "quantity": 1
+        },
+        {
+          "date": "2026-06-23",
+          "quantity": 2
+        },
+        {
+          "date": "2026-06-27",
+          "quantity": 2
+        },
+        {
+          "date": "2026-07-14",
+          "quantity": 2
+        },
+        {
+          "date": "2026-07-18",
+          "quantity": 2
+        },
+        {
+          "date": "2026-07-21",
+          "quantity": 2
+        },
+        {
+          "date": "2026-07-25",
+          "quantity": 1
+        },
+        {
+          "date": "2026-07-28",
+          "quantity": 2
+        },
+        {
+          "date": "2026-08-01",
+          "quantity": 2
+        },
+        {
+          "date": "2026-08-04",
+          "quantity": 2
+        },
+        {
+          "date": "2026-08-08",
+          "quantity": 2
+        },
+        {
+          "date": "2026-08-18",
+          "quantity": 2
+        },
+        {
+          "date": "2026-08-22",
+          "quantity": 1
+        },
+        {
+          "date": "2026-08-25",
+          "quantity": 2
+        },
+        {
+          "date": "2026-08-29",
+          "quantity": 1
+        },
+        {
+          "date": "2026-09-01",
+          "quantity": 1
+        },
+        {
+          "date": "2026-09-05",
+          "quantity": 1
+        },
+        {
+          "date": "2026-09-22",
+          "quantity": 2
+        },
+        {
+          "date": "2026-09-26",
+          "quantity": 2
+        },
+        {
+          "date": "2026-09-29",
+          "quantity": 2
+        },
+        {
+          "date": "2026-10-03",
+          "quantity": 2
+        },
+        {
+          "date": "2026-10-06",
+          "quantity": 2
+        },
+        {
+          "date": "2026-10-10",
+          "quantity": 1
+        },
+        {
+          "date": "2026-10-13",
+          "quantity": 2
+        },
+        {
+          "date": "2026-10-17",
+          "quantity": 2
+        },
+        {
+          "date": "2026-10-20",
+          "quantity": 2
+        },
+        {
+          "date": "2026-10-24",
+          "quantity": 2
+        },
+        {
+          "date": "2026-10-27",
+          "quantity": 2
+        },
+        {
+          "date": "2026-10-31",
+          "quantity": 1
+        }
+      ],
+      "stock": [
+        {
+          "date": "2026-06-06",
+          "closing_stock": 40.0
+        },
+        {
+          "date": "2026-06-13",
+          "closing_stock": 36.0
+        },
+        {
+          "date": "2026-06-20",
+          "closing_stock": 31.0
+        },
+        {
+          "date": "2026-06-27",
+          "closing_stock": 28.0
+        },
+        {
+          "date": "2026-07-04",
+          "closing_stock": 24.0
+        },
+        {
+          "date": "2026-07-18",
+          "closing_stock": 20.0
+        },
+        {
+          "date": "2026-07-25",
+          "closing_stock": 17.0
+        },
+        {
+          "date": "2026-08-01",
+          "closing_stock": 13.0
+        },
+        {
+          "date": "2026-08-08",
+          "closing_stock": 9.0
+        },
+        {
+          "date": "2026-08-22",
+          "closing_stock": 6.0
+        },
+        {
+          "date": "2026-08-29",
+          "closing_stock": 3.0
+        },
+        {
+          "date": "2026-09-05",
+          "closing_stock": 1.0
+        },
+        {
+          "date": "2026-09-12",
+          "closing_stock": 0.0
+        },
+        {
+          "date": "2026-09-19",
+          "closing_stock": 0.0
+        },
+        {
+          "date": "2026-09-26",
+          "closing_stock": 30.0
+        },
+        {
+          "date": "2026-10-03",
+          "closing_stock": 26.0
+        },
+        {
+          "date": "2026-10-10",
+          "closing_stock": 22.0
+        },
+        {
+          "date": "2026-10-17",
+          "closing_stock": 19.0
+        },
+        {
+          "date": "2026-10-24",
+          "closing_stock": 15.0
+        },
+        {
+          "date": "2026-10-31",
+          "closing_stock": 12.0
+        }
+      ]
+    }
+  ]
+}
