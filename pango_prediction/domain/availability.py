@@ -12,9 +12,9 @@ Availability is derived from stock history, never received as a resolved flag
 - a negative balance means nothing available, not negative availability;
 - a week with no sales and no closing stock is a stockout;
 - a week that sold and closed at zero stays observed (S25);
-- consecutive stockout weeks form an episode, and an episode longer than
-  ``MAX_STOCKOUT_EPISODE_WEEKS`` is read as the product no longer being
-  supplied (S26) instead of as a stockout;
+- consecutive stockout weeks form an episode, and an episode longer than the
+  tenant's ``max_stockout_episode_weeks`` is read as the product no longer
+  being supplied (S26) instead of as a stockout;
 - weeks after the last sale are inactivity, not censoring, and are left to the
   demand profile;
 - censoring is only evaluated for series that are actually held in stock, which
@@ -24,6 +24,10 @@ Availability is derived from stock history, never received as a resolved flag
 from datetime import date, timedelta
 from math import isfinite
 
+from pango_prediction.domain.parameters import (
+    DEFAULT_PARAMETERS,
+    DomainParameters,
+)
 from pango_prediction.domain.series import DAYS_PER_WEEK
 from pango_prediction.domain.types import (
     AvailabilityState,
@@ -34,25 +38,10 @@ from pango_prediction.domain.types import (
 )
 
 STOCK_TOLERANCE = 1e-6
-"""Tolerance for comparing a stock balance against zero (notebook ``TOL``)."""
+"""Tolerance for comparing a stock balance against zero (notebook ``TOL``).
 
-MAX_STOCKOUT_EPISODE_WEEKS = 13
-"""Longest stockout episode still read as a stockout (notebook S26).
-
-Thirteen weeks is roughly four replenishment cycles; beyond that the notebook
-reads the gap as the product no longer being supplied.
+Not a business rule and not tenant-scoped: it guards against float noise.
 """
-
-MADE_TO_ORDER_THRESHOLD = 0.5
-"""Share of selling weeks that may start without stock (notebook S24).
-
-At or above this share the product is read as sold to order rather than held in
-stock. The notebook reports that moving the threshold to 0.25 or 0.75 changes
-the classification of only 3.7 % of units.
-"""
-
-MIN_WEEKS_WITH_STOCK_DATA = 4
-"""Selling weeks with a known opening balance needed to classify (notebook S24)."""
 
 
 def _daily_closing_stock(
@@ -124,6 +113,7 @@ def _available_quantity(closing_stock: float) -> float:
 def _classify_stock_handling(
     values: tuple[float, ...],
     opening_stock: tuple[float | None, ...],
+    parameters: DomainParameters,
 ) -> StockHandling:
     """Decide how a series is supplied from the stock it opened its sales with.
 
@@ -140,14 +130,14 @@ def _classify_stock_handling(
         if demand > 0 and opening is not None:
             openings.append(opening)
 
-    if len(openings) < MIN_WEEKS_WITH_STOCK_DATA:
+    if len(openings) < parameters.min_weeks_with_stock_data:
         return StockHandling.NOT_CLASSIFIABLE
 
     started_empty = sum(
         1 for opening in openings if _available_quantity(opening) <= STOCK_TOLERANCE
     )
 
-    if started_empty / len(openings) >= MADE_TO_ORDER_THRESHOLD:
+    if started_empty / len(openings) >= parameters.made_to_order_threshold:
         return StockHandling.MADE_TO_ORDER
 
     return StockHandling.STOCK_MANAGED
@@ -156,11 +146,12 @@ def _classify_stock_handling(
 def classify_stock_handling(
     series: RegularizedSeries,
     stock: tuple[StockObservation, ...],
+    parameters: DomainParameters = DEFAULT_PARAMETERS,
 ) -> StockHandling:
     """Classify how ``series`` is supplied (notebook S24)."""
     opening_stock, _ = _resolve_weekly_stock(series.dates, stock)
 
-    return _classify_stock_handling(series.values, opening_stock)
+    return _classify_stock_handling(series.values, opening_stock, parameters)
 
 
 def _last_week_with_demand(values: tuple[float, ...]) -> int | None:
@@ -174,6 +165,7 @@ def _last_week_with_demand(values: tuple[float, ...]) -> int | None:
 def _resolve_episodes(
     states: list[AvailabilityState],
     is_stockout: list[bool],
+    parameters: DomainParameters,
 ) -> None:
     """Label each run of consecutive stockout weeks by its length.
 
@@ -196,7 +188,7 @@ def _resolve_episodes(
 
         state = (
             AvailabilityState.CENSORED
-            if length <= MAX_STOCKOUT_EPISODE_WEEKS
+            if length <= parameters.max_stockout_episode_weeks
             else AvailabilityState.OUT_OF_ASSORTMENT
         )
 
@@ -209,14 +201,20 @@ def _resolve_episodes(
 def build_weekly_availability(
     series: RegularizedSeries,
     stock: tuple[StockObservation, ...],
+    parameters: DomainParameters = DEFAULT_PARAMETERS,
 ) -> WeeklyAvailability:
     """Classify the availability of every week of ``series``.
 
     ``series`` must already be a regular weekly grid, so that availability and
     demand share one definition of the week.
+
+    ``parameters`` carries the tenant's calibration. The default is the platform
+    starting point, not a universal rule: see `domain/parameters.py`.
     """
     opening_stock, closing_stock = _resolve_weekly_stock(series.dates, stock)
-    stock_handling = _classify_stock_handling(series.values, opening_stock)
+    stock_handling = _classify_stock_handling(
+        series.values, opening_stock, parameters
+    )
     last_sale = _last_week_with_demand(series.values)
 
     states: list[AvailabilityState] = []
@@ -247,7 +245,7 @@ def build_weekly_availability(
         states.append(state)
         is_stockout.append(state == AvailabilityState.CENSORED)
 
-    _resolve_episodes(states, is_stockout)
+    _resolve_episodes(states, is_stockout, parameters)
 
     return WeeklyAvailability(
         series_id=series.series_id,

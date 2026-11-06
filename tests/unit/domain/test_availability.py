@@ -3,10 +3,12 @@ from datetime import date, timedelta
 import pytest
 
 from pango_prediction.domain.availability import (
-    MAX_STOCKOUT_EPISODE_WEEKS,
-    MIN_WEEKS_WITH_STOCK_DATA,
     build_weekly_availability,
     classify_stock_handling,
+)
+from pango_prediction.domain.parameters import (
+    DEFAULT_PARAMETERS,
+    DomainParameters,
 )
 from pango_prediction.domain.types import (
     AvailabilityState,
@@ -16,6 +18,9 @@ from pango_prediction.domain.types import (
 )
 
 WEEK_1 = date(2026, 10, 5)  # Monday
+
+MAX_STOCKOUT_EPISODE_WEEKS = DEFAULT_PARAMETERS.max_stockout_episode_weeks
+MIN_WEEKS_WITH_STOCK_DATA = DEFAULT_PARAMETERS.min_weeks_with_stock_data
 
 WARMUP = MIN_WEEKS_WITH_STOCK_DATA
 """Selling weeks prepended so that a scenario qualifies as stock managed (S24)."""
@@ -466,6 +471,74 @@ def test_series_id_and_dates_are_preserved() -> None:
 
     assert result.series_id == "PW-001"
     assert result.dates == series.dates
+
+
+# --- a different tenant's calibration gives a different answer ---
+#
+# This is the whole point of the parameters being tenant-scoped: the same
+# history is read differently by a company that replenishes weekly than by one
+# that replenishes monthly.
+
+
+def test_a_shorter_stockout_threshold_turns_a_gap_into_out_of_assortment() -> None:
+    """A tenant replenishing weekly reads a 5-week gap as no longer supplied."""
+    series, stock = _episode(5)
+    parameters = DomainParameters(max_stockout_episode_weeks=4)
+
+    with_default = build_weekly_availability(series, stock)
+    with_tenant = build_weekly_availability(series, stock, parameters)
+
+    assert with_default.states[WARMUP + 1] == AvailabilityState.CENSORED
+    assert with_tenant.states[WARMUP + 1] == AvailabilityState.OUT_OF_ASSORTMENT
+
+
+def test_a_lower_data_requirement_makes_a_short_series_classifiable() -> None:
+    series = make_series((5.0, 5.0))
+    stock = (
+        stock_on(week(0) - timedelta(days=1), 10.0),
+        stock_on(week(0), 8.0),
+        stock_on(week(1), 6.0),
+    )
+
+    assert classify_stock_handling(series, stock) is StockHandling.NOT_CLASSIFIABLE
+
+    relaxed = DomainParameters(min_weeks_with_stock_data=2)
+
+    assert (
+        classify_stock_handling(series, stock, relaxed)
+        is StockHandling.STOCK_MANAGED
+    )
+
+
+def test_a_stricter_made_to_order_threshold_keeps_a_series_stock_managed() -> None:
+    """Half the selling weeks open empty: made to order at 0.5, not at 0.75."""
+    series = make_series((5.0,) * 4)
+    stock = (
+        stock_on(week(0) - timedelta(days=1), 10.0),
+        stock_on(week(0), 0.0),
+        stock_on(week(1), 0.0),
+        stock_on(week(2), 10.0),
+        stock_on(week(3), 10.0),
+    )
+
+    assert classify_stock_handling(series, stock) is StockHandling.MADE_TO_ORDER
+
+    strict = DomainParameters(made_to_order_threshold=0.75)
+
+    assert (
+        classify_stock_handling(series, stock, strict)
+        is StockHandling.STOCK_MANAGED
+    )
+
+
+def test_the_default_calibration_is_used_when_none_is_given() -> None:
+    series, stock = _episode(MAX_STOCKOUT_EPISODE_WEEKS)
+
+    implicit = build_weekly_availability(series, stock)
+    explicit = build_weekly_availability(series, stock, DEFAULT_PARAMETERS)
+
+    assert implicit.states == explicit.states
+    assert implicit.stock_handling is explicit.stock_handling
 
 
 def test_empty_series_returns_empty_availability() -> None:

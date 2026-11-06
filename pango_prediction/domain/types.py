@@ -40,13 +40,14 @@ class AvailabilityState(StrEnum):
         Demand was observable: either the product sold, or it did not sell while
         stock was on hand.
     CENSORED
-        No sales and no closing stock, within a stockout episode of at most
-        ``MAX_STOCKOUT_EPISODE_WEEKS`` weeks. Real demand is unknown and at
-        least as large as the observed zero.
+        No sales and no closing stock, within a stockout episode no longer than
+        the tenant's threshold. Real demand is unknown and at least as large as
+        the observed zero.
     OUT_OF_ASSORTMENT
         The same situation, but the episode is longer than that threshold. The
         notebook (S26) reads these as the product no longer being supplied
-        rather than as a stockout.
+        rather than as a stockout. The threshold is tenant-scoped: see
+        `domain/parameters.py`.
     UNKNOWN
         Availability could not be determined, because there is no reliable
         stock information or the week lies outside the window in which the

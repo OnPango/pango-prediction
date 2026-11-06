@@ -61,7 +61,24 @@ This is a limitation of the legacy World Office export, where warehouse identity
 
 **Consequence for the shared domain:** `series_id` must stay **opaque**. No domain module may parse it, split it or assume it encodes a warehouse. That is what allows one implementation to serve both grains, and it is why the invariant above still holds even though the two routes run at different levels of aggregation.
 
-**Consequence for the golden test:** parity between the two routes can only be compared at product grain, using the notebook's aggregation.
+### Decided: production forecasts each product-warehouse series directly
+
+Route A proposed a hybrid scheme — model at product grain over the 195 weeks of both exports, then disaggregate to product × warehouse using 2026 shares with shrinkage toward the city or category share.
+
+**That disaggregation will not be built.** Production treats each product × warehouse series on its own, which is what `architecture.md` §4 already required:
+
+> There is no global-product forecast followed by allocation.
+
+The consequences, recorded so that nobody has to rediscover them:
+
+- Route B needs **no cross-sectional aggregation and no allocation**. Temporal aggregation (daily to weekly, weekly to monthly) stays ours; summing across warehouses does not exist.
+- The contract keeps a **flat `series[]`**. Grouping by product was only needed so the service could verify it had every warehouse of a product before summing; with independent series, a batch split across calls is harmless.
+- **Sparse series are not abandoned.** The policy's `INSUFFICIENT` rule routes them to `pooled_rate` with `group: grupo2`, which borrows a rate from the category at the model level. That is the mechanism that covers what allocation would have covered.
+- A **non-stock warehouse** has no product-level forecast to fall back on, so it simply returns no forecast with `reason = non_stock_warehouse`.
+
+What this does **not** settle is how Route A evaluates. Warehouse identity is not continuous across the two exports (S4), so a product × warehouse series exists only in the 2026 file: about **39 weeks**, against 195 at product grain. Thirteen evaluation blocks of four weeks need 52 weeks, so they do not fit, and Route A's proposed first cutoff of 2025-09-28 is earlier than that file begins. Choosing the evaluation grain is Route A's call per tenant; it does not change production.
+
+**Consequence for the golden test:** parity can be compared at whichever grain Route A evaluates, because the domain is grain-agnostic. What must match is the transformation code and the parameter fingerprint of §11, not the level of aggregation.
 
 ---
 
@@ -395,38 +412,96 @@ likelihood: NegativeBinomial
 
 ---
 
-## 11. Parameter registry
+## 11. Parameter scope: platform rule or tenant calibration
 
-| Parameter | Value | Source | Implemented |
+PANGO is multi-tenant, so the numbers in this document are not all of one kind. Some are rules that hold everywhere; others are **calibrations of one company's behaviour**, and applying them to a different tenant would be wrong rather than merely imprecise.
+
+The clearest example is the Saturday weight of 0.6. It exists because EquipMaster invoices 11.8 % of its units on Saturdays. A tenant closed on Saturdays needs 0, and one that trades on Sundays needs a different table altogether.
+
+| Kind | Examples | Why |
+|---|---|---|
+| **Platform rule** | Monday-start week, gross non-negative demand, the four availability states, the episode logic, the ADI and CV² cutoffs of 1.32 and 0.49, the float tolerance | Semantics or published literature, not fitted to any catalogue |
+| **Tenant calibration** | stockout threshold, made-to-order thresholds, inactivity window, history classes, minimum observed weeks, Saturday weight, year-start closure, public holidays, horizon | Derived from one company's replenishment interval, catalogue, operating days or country |
+
+### Where the calibration lives
+
+`pango_prediction/domain/parameters.py` holds a frozen `DomainParameters`. Its defaults are EquipMaster's values, used as the platform starting point for a tenant that has not been calibrated yet — not a claim that they hold everywhere.
+
+The parameters travel with the versioned policy artifact, which Route A defined as `model_policy.json` plus hyperparameters plus **a hash of the domain parameters**, surfaced as `params_version`. That hash is what makes parity auditable per tenant: it proves the evaluation run and the production run used the same calibration.
+
+`DomainParameters.fingerprint()` computes it, with a recipe simple enough for both routes to reproduce:
+
+```text
+the fields as JSON, keys sorted, no whitespace -> SHA-256 -> first 16 hex characters
+```
+
+For the current defaults that is `8f7bb9c36953951c`. **Both routes must agree on this recipe**; if Route A hashes differently, the two fingerprints will never match and the audit is worthless.
+
+### Parameters still to join it
+
+Only the three the code reads today are fields. The rest join `DomainParameters` as the module that reads them is built, and the policy artifact should plan for them:
+
+| Parameter | Value | Source | Needs |
 |---|---|---|---|
-| Week start | Monday | 7.0, 7.1 | `week_start()` |
-| Frequency | weekly (`W-MON`) | 13.2 | implicit |
-| Horizon | 4 weeks | 8.2 | not yet |
-| Stock tolerance | `1e-6` | notebook `TOL` | `STOCK_TOLERANCE` |
-| Max stockout episode | 13 weeks | S26 | `MAX_STOCKOUT_EPISODE_WEEKS` |
-| Made-to-order threshold | 0.5 | S24 | `MADE_TO_ORDER_THRESHOLD` |
-| Min weeks with stock data | 4 | S24 | `MIN_WEEKS_WITH_STOCK_DATA` |
-| Inactivity window | 26 weeks | 7.5 | not yet |
-| New product | ≤ 13 weeks | E5 | not yet |
-| Limited history | 14–52 weeks | E5 | not yet |
-| Min observed weeks to forecast | 8 (= 2 × H) | E1 | not yet |
-| ADI cutoff | 1.32 | Syntetos & Boylan, 9.1 | not yet |
-| CV² cutoff | 0.49 | Syntetos & Boylan, 9.1 | not yet |
-| Classification grain | monthly | S27 | not yet |
-| Classification window | 24 months | 13.2 | not yet |
-| Saturday weight | 0.6 | 11.3, 11.4 | not yet |
-| Full week business days | 5.6 | 11.4 | not yet |
-| Year-start closure | 1–6 January | 11.2, 11.4 | not yet |
-| Seasonal rescue | ≥ 2 years and ≥ 50 % in Oct–Dec | 7.5 C | not yet |
-| Evaluation blocks | 13 (1–7 selection, 8–13 report) | 13.2 | Route A only |
-| Likelihood | NegativeBinomial | S18 | Route A only |
+| Inactivity window | 26 weeks | S29 | `profile.py` |
+| New / limited history | 13 / 52 weeks | E5 | `profile.py` |
+| Minimum observed weeks | 8 | E1 | `profile.py` |
+| Saturday weight | 0.6 | S34 | `calendar.py` |
+| Year-start closure | 30 Dec – 6 Jan | S34 | `calendar.py` |
+| Horizon | 4 weeks | 8.2 | the policy already carries `horizon_weeks` |
+
+### Cold start is the normal state for a new tenant
+
+Every tenant begins with no demand history, no stock history — `stock_balances` keeps no history, so movements only start at onboarding — and no policy. That is not an edge case: it is what every new customer sees first.
+
+The service already answers sensibly: a series with no observed demand gives `INSUFFICIENT_HISTORY`, fewer than four selling weeks with stock data gives `NOT_CLASSIFIABLE`, and no policy gives `MODEL_NOT_AVAILABLE`. That behaviour is currently incidental rather than designed, and it deserves its own tested path.
+
+One gap this opens: `pooled_rate` borrows a rate from the category, which needs history **in the category**. A tenant created yesterday has none anywhere, which is deeper than the cold start Route A's `demand_class: NOT_CLASSIFIABLE` describes (Core cannot reconstruct stock yet).
 
 ---
 
-## 12. Open decisions
+## 12. Parameter registry
 
-1. **Who computes Colombian public holidays.** The notebook used the `holidays` package. Options: Pango Core sends every non-operational date in `calendar.closed_dates` (keeps the domain dependency-free, and the contract already has the field), or the service takes on the dependency. *Recommended:* the former.
-2. **Year-start closure for future years.** The notebook assumes 1–6 January and marks it as pending confirmation by the company.
+Scope is from §11: a platform rule holds for every tenant, a calibration does not.
+
+| Parameter | Value | Source | Scope | Implemented |
+|---|---|---|---|---|
+| Week start | Monday | 7.0, 7.1 | platform | `week_start()` |
+| Frequency | weekly (`W-MON`) | 13.2 | platform | implicit |
+| Stock tolerance | `1e-6` | notebook `TOL` | platform | `STOCK_TOLERANCE` |
+| ADI cutoff | 1.32 | Syntetos & Boylan, 9.1 | platform | not yet |
+| CV² cutoff | 0.49 | Syntetos & Boylan, 9.1 | platform | not yet |
+| Classification grain | monthly | S27 | platform | not yet |
+| Max stockout episode | 13 weeks | S26 | tenant | `DomainParameters.max_stockout_episode_weeks` |
+| Made-to-order threshold | 0.5 | S24 | tenant | `DomainParameters.made_to_order_threshold` |
+| Min weeks with stock data | 4 | S24 | tenant | `DomainParameters.min_weeks_with_stock_data` |
+| Horizon | 4 weeks | 8.2 | tenant | the policy's `horizon_weeks` |
+| Inactivity window | 26 weeks | S29 | tenant | not yet |
+| New product | ≤ 13 weeks | E5 | tenant | not yet |
+| Limited history | 14–52 weeks | E5 | tenant | not yet |
+| Min observed weeks to forecast | 8 (= 2 × H) | E1 | tenant | not yet |
+| Classification window | 24 months | S30 | tenant | not yet |
+| Saturday weight | 0.6 | 11.3, 11.4 | tenant | not yet |
+| Full week business days | 5.6 | 11.4 | tenant | not yet |
+| Year-start closure | 30 Dec – 6 Jan | S34 | tenant | not yet |
+| Public holidays | Colombia, for this tenant | S34 | tenant | not yet, and unresolved: see §13 |
+| Seasonal rescue | ≥ 2 years and ≥ 50 % in Oct–Dec | 7.5 C | tenant | not yet |
+| Interval quantiles | 0.10 / 0.90 | Route A | tenant | the policy's `interval` |
+| Evaluation blocks | 13 (1–7 selection, 8–13 report) | 13.2 | tenant | Route A only |
+| Likelihood | NegativeBinomial | S18 | tenant | Route A only |
+
+Every parameter marked `tenant` that is not yet a field of `DomainParameters` is a value currently written into code or into this document as though it were universal. Each one has to move into the calibration before a second tenant is onboarded.
+
+---
+
+## 13. Open decisions
+
+1. **Who computes public holidays — reopened by multi-tenancy.** Route A's answer was that the service computes Colombian holidays with a version-pinned `holidays` package. That does not survive a second tenant: the service would need the tenant's country, and the schema has none — only `settings.time_zone` and a free-text `warehouses.address`. A tenant in Mexico or Spain would be served Colombian holidays.
+
+   The resolution is to split the two things that were conflated. The **weight table** (Monday–Friday 1.0, Saturday per tenant, Sunday 0, closed 0) is a domain rule and stays in shared code. **Which dates are closed** is tenant data and comes in the request. Parity is preserved by sharing the rule, not by sharing the holiday computation, so Route A's notebook reads the same closed-date list Core sends.
+
+   *Recommended:* Core sends every non-operational date; the service takes no holiday dependency.
+2. **Year-start closure for future years.** The notebook assumed 1–6 January; Route A's reply says 30 December – 6 January. Immaterial if Core sends the dates, which is the recommendation above. Still pending confirmation by the company.
 3. **`demand_class` and `model` enum values.** Per-tenant enums, not yet created. §8 carries a proposal.
 4. **What happens to the `INSUFFICIENT` class in production.** 44 % of products, 3.8 % of units.
 5. **Policy format.** Must express the five-dimension routing of §9 and a "no forecast" outcome.
@@ -435,7 +510,7 @@ likelihood: NegativeBinomial
 
 ---
 
-## 13. Discrepancies with the other documents
+## 14. Discrepancies with the other documents
 
 Listed rather than silently fixed, per the source-of-truth rule in `AGENTS.md`.
 
@@ -455,7 +530,7 @@ Listed rather than silently fixed, per the source-of-truth rule in `AGENTS.md`.
 
 ---
 
-## 14. Limitations inherited from Route A
+## 15. Limitations inherited from Route A
 
 These are the notebook's own caveats (13.4), and they bound what production can claim.
 
@@ -467,7 +542,7 @@ These are the notebook's own caveats (13.4), and they bound what production can 
 
 ---
 
-## 15. Provenance
+## 16. Provenance
 
 Every rule here was read from the executed outputs of `docs/retail-inventory-forecasting-demand-analysis.ipynb` (255 cells) and cross-checked against the tenant database schema. Where the notebook's narrative text disagreed with its own computed output, the output was used.
 
