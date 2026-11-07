@@ -16,9 +16,9 @@
 
 | Check | Result |
 |---|---|
-| `uv run python -m pytest` | |
-| `uv run ruff check .` | |
-| `uv run python -m mypy pango_prediction tests` | |
+| `python -m pytest` | |
+| `ruff check .` | |
+| `python -m mypy pango_prediction tests` | |
 
 ## Open decisions
 

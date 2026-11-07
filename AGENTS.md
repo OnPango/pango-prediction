@@ -391,22 +391,38 @@ Do not overwrite user changes that are unrelated to the current task.
 
 The development environment uses Python 3.12.
 
-Current development checks are:
+The project uses only `pip` and a virtual environment. `uv` is not used. The owner's machine cannot run it, and the Docker image installs with `pip`.
 
-```powershell
+Setup, once per checkout:
+
+```text
+python -m venv .venv
+```
+
+Activate the environment in every new shell:
+
+```text
+Windows (PowerShell):  .venv\Scripts\Activate.ps1
+Linux / cloud session: source .venv/bin/activate
+```
+
+Install the runtime dependencies and the `dev` group, both read from `pyproject.toml`:
+
+```text
+python -c "import subprocess, sys, tomllib; p = tomllib.load(open('pyproject.toml', 'rb')); subprocess.check_call([sys.executable, '-m', 'pip', 'install', *p['project']['dependencies'], *p['dependency-groups']['dev']])"
+```
+
+This line works in both PowerShell and bash. It reads the lists from `pyproject.toml`, so that file stays the single source of dependencies, as it is in `docker/Dockerfile.api`. It needs neither a build backend nor a minimum `pip` version.
+
+Current development checks, the same on every platform with the environment active:
+
+```text
 python -m pytest
 ruff check .
 python -m mypy pango_prediction tests
 ```
 
-In a Claude Code cloud session (Linux, `uv` preinstalled) the same checks are:
-
-```bash
-uv sync
-uv run python -m pytest
-uv run ruff check .
-uv run python -m mypy pango_prediction tests
-```
+In a cloud session, run the setup and the checks yourself before opening a PR. The owner may be on a phone.
 
 A normal implementation task should finish with the relevant checks passing.
 
