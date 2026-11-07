@@ -399,6 +399,15 @@ ruff check .
 python -m mypy pango_prediction tests
 ```
 
+In a Claude Code cloud session (Linux, `uv` preinstalled) the same checks are:
+
+```bash
+uv sync
+uv run python -m pytest
+uv run ruff check .
+uv run python -m mypy pango_prediction tests
+```
+
 A normal implementation task should finish with the relevant checks passing.
 
 If a check fails:
@@ -411,6 +420,71 @@ If a check fails:
 Use type hints for production Python code.
 
 Prefer explicit, readable code over unnecessary abstraction.
+
+---
+
+## Git workflow
+
+The owner often works from a phone through Claude Code cloud sessions, with no local checkout and no way to run commands.
+
+A cloud container is discarded after a period of inactivity. Anything that has not been pushed is lost, so the remote repository is the only durable record of the work.
+
+### Branches
+
+```text
+main            releases; feature work never touches it
+dev             integration branch; every feature PR targets it
+feature/<slug>  one per feature, created from the latest origin/dev
+```
+
+- At the start of a session, run `git fetch origin`, check `git status` and look at the open PRs into `dev`. The session may have started on `main` (which holds only the README) or on an automatic `claude/*` branch. Neither is the starting point for work.
+- Start every feature from the latest `dev`:
+
+  ```bash
+  git fetch origin dev
+  git checkout -b feature/<slug> origin/dev
+  ```
+
+- One feature per branch. A feature is one coherent capability that can be reviewed and merged on its own.
+- `<slug>` is lowercase and hyphenated, and names the capability: `feature/policy-loader`, `feature/statsforecast-adapters`.
+- Cloud sessions are assigned an automatic `claude/*` branch. Do not use it in this repository. The owner authorizes creating and pushing `feature/<slug>` branches instead.
+- If the next feature depends on a PR that is not merged into `dev` yet, ask the owner whether to wait for the merge or to branch from the unmerged feature branch. Do not stack branches silently.
+- Never push to `dev` or `main` directly. Never force-push a branch someone else has pushed to. Never merge a PR: the owner reviews and merges.
+
+### Commits
+
+- One commit per group of files that change for the same reason. Examples: a domain module together with its unit tests; the API schemas together with the API tests; the documentation for the feature.
+- Keep a module and its tests in the same commit, so that every commit passes the checks on its own.
+- The subject line is in English, imperative, under about 72 characters, in the style of the existing history (`Add ...`, `Implement ...`). The body lists the files in the commit and why they change together.
+- Push after each commit group, so the work survives the loss of the container:
+
+  ```bash
+  git push -u origin feature/<slug>
+  ```
+
+### Pull request
+
+- Base `dev`, head `feature/<slug>`. Open it once the feature is complete, pushed and passing the quality gates.
+- The description follows `.github/pull_request_template.md`: what and why, a table of commits with their files, the checks with their results, open decisions and the next step.
+- After opening it, give the owner the PR link. The next feature starts on a new branch from `origin/dev`, following the dependency rule above.
+
+### Worklog
+
+Every feature branch adds one entry under `docs/worklog/`, named `YYYY-MM-DD-<slug>.md`, in its last commit before the PR.
+
+The worklog is the in-repository history of what was done and why. Git history and PRs show the what; the worklog keeps the reasoning, the checks and the open decisions next to the code. The format is in `docs/worklog/README.md`.
+
+### Reporting to the owner
+
+The "After editing" requirements above apply. Because the owner reads on a phone, keep each report scannable:
+
+1. branch and PR link;
+2. commits, each with its hash and the files it contains;
+3. checks executed and their results;
+4. what needs the owner: decisions, a review, a merge;
+5. the proposed next step.
+
+Prefer short lists and small tables. Do not paste long diffs unless the owner asks for them.
 
 ---
 
