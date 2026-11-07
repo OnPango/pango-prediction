@@ -19,6 +19,7 @@
 | `python -m pytest` | |
 | `ruff check .` | |
 | `python -m mypy pango_prediction tests` | |
+| CI on this PR (`.github/workflows/ci.yml`) | |
 
 ## Open decisions
 
