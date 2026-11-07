@@ -564,7 +564,7 @@ Listed rather than silently fixed, per the source-of-truth rule in `AGENTS.md`.
 |---|---|---|
 | 1 | `architecture.md` §7 and the two-route plan describe `pango-forecast-service/` with `src/pango_forecast/` and `api/`, `models/`, `artifacts/`. The repository is `pango-prediction/` with a hexagonal layout. | Stale documentation. The live repository is authoritative. |
 | 2 | `README.md` shows the hexagonal layout in "Repository Structure" but `src/pango_forecast/models/` under "Models". | Internally inconsistent README. |
-| 3 | `README.md` development setup says `uv sync`, `uv run pytest`, `uv run mypy src`. `uv` is not installed and `src/` does not exist. | Stale. `AGENTS.md` has the working commands. |
+| 3 | `README.md` development setup says `uv sync`, `uv run pytest`, `uv run mypy src`. `uv` is not installed and `src/` does not exist. | Resolved: `uv` is not used. `README.md` and `AGENTS.md` share one `pip` and virtual-environment setup and the same checks. |
 | 4 | `contract-v1.md` §11 lists four availability states including `SIN_SURTIDO`; `AGENTS.md` and `PREDICTION_CONTEXT.md` list three. | Resolved: four states, see §6. Identifier anglicised to `OUT_OF_ASSORTMENT`. |
 | 5 | `contract-v1.md` §8 carried `metadata.made_to_order`. No such column exists, and the notebook derives it. | **Resolved.** Removed from the contract in 1.1, and the service rejects the field rather than ignoring it. |
 | 6 | `contract-v1.md` §13 listed only Mon-Fri / Sat / Sun / closed dates. Holy Saturday and the year-start closure were missing. | **Resolved.** §13 now states that Core must send *every* non-operational date and names those two, and the weight table became tenant calibration. |

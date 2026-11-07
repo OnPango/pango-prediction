@@ -750,36 +750,49 @@ The trainer is not intended to operate as a permanently running HTTP service.
 
 # Development Setup
 
-> Development setup is being introduced incrementally as the repository is initialized.
-
-Planned Python version:
+Python version:
 
 ```text
 Python 3.12
 ```
 
-Install dependencies:
+The project uses `pip` and a virtual environment. `uv` is not used.
 
-```bash
-uv sync
+Create the environment once:
+
+```text
+python -m venv .venv
+```
+
+Activate it in every new shell:
+
+```text
+Windows (PowerShell):  .venv\Scripts\Activate.ps1
+Linux / macOS:         source .venv/bin/activate
+```
+
+Install the runtime dependencies and the `dev` group, both read from `pyproject.toml`:
+
+```text
+python -c "import subprocess, sys, tomllib; p = tomllib.load(open('pyproject.toml', 'rb')); subprocess.check_call([sys.executable, '-m', 'pip', 'install', *p['project']['dependencies'], *p['dependency-groups']['dev']])"
 ```
 
 Run tests:
 
-```bash
-uv run pytest
+```text
+python -m pytest
 ```
 
 Run linting:
 
-```bash
-uv run ruff check .
+```text
+ruff check .
 ```
 
 Run type checks:
 
-```bash
-uv run mypy src
+```text
+python -m mypy pango_prediction tests
 ```
 
 ---
