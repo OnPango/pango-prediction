@@ -4,13 +4,28 @@ version = "0.1.0"
 description = "Prediction service for PANGO"
 requires-python = ">=3.12,<3.13"
 
+[dependency-groups]
+dev = [
+    "mypy>=2.4",
+    "pytest>=9.2",
+    "pytest-cov>=7.1",
+    "ruff>=0.17",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# The project is not installed into the environment, so the repository root has
+# to be on sys.path. Without this, the `pytest` entry point fails to import
+# `pango_prediction` and only `python -m pytest` works.
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Route A research notebooks are reference artifacts, not service code: they are
+# written in Colab and are not meant to follow this service's lint rules.
+extend-exclude = ["docs/*.ipynb"]
 
 [tool.ruff.lint]
 select = [
