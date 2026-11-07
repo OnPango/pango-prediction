@@ -10,7 +10,9 @@ form, and it is what lets a test run the API against its own settings without
 touching the environment.
 """
 
+import logging
 import secrets
+import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header
@@ -47,6 +49,16 @@ from pango_prediction.domain.types import (
     ForecastSeriesInput,
     StockObservation,
 )
+
+logger = logging.getLogger(__name__)
+"""Named after this module, with no handler attached here.
+
+A module that called ``basicConfig`` would reshape the logging of whatever
+imported it. The handler is attached once by `main.configure_logging`, at the
+composition root, because uvicorn configures only its own loggers and leaves
+the root one without any - so these records would otherwise be dropped at
+root's default WARNING.
+"""
 
 
 def to_series_input(series: SeriesRequest) -> ForecastSeriesInput:
@@ -194,12 +206,49 @@ def build_router(settings: Settings, service: ForecastService) -> APIRouter:
                 settings.max_series_per_request,
             )
 
+        started = time.perf_counter()
         batch = service.run(to_command(request))
+        duration_ms = (time.perf_counter() - started) * 1000
 
         results = [
             to_series_result(series.series_id, outcome)
             for series, outcome in zip(request.series, batch.outcomes, strict=True)
         ]
+
+        if batch.error_count == 0:
+            status = "ok"
+        elif batch.ok_count == 0:
+            status = "error"
+        else:
+            status = "partial"
+
+        # Contract section 20. The fields go in the message so that they are
+        # greppable under uvicorn's plain formatter, and in `extra` so that a
+        # structured handler can read them without parsing the text.
+        #
+        # Nothing from the payload is logged: section 20 forbids logging full
+        # histories, and a batch of 500 series would otherwise write megabytes
+        # of a tenant's sales per request.
+        #
+        # `model_name` and `model_version` are null because no policy is
+        # deployed. They are also mis-placed by the contract: once a policy
+        # exists the model is chosen per series, not per request, so they will
+        # belong to a per-series record rather than to this one.
+        fields = {
+            "request_id": request.request_id,
+            "forecast_run_id": request.forecast_run_id,
+            "series_count": len(results),
+            "policy_version": batch.policy_version,
+            "model_name": None,
+            "model_version": None,
+            "duration_ms": round(duration_ms, 1),
+            "status": status,
+        }
+
+        logger.info(
+            " ".join(f"{key}={value}" for key, value in fields.items()),
+            extra=fields,
+        )
 
         return ForecastResponse(
             contract_version=CONTRACT_VERSION,

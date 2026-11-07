@@ -22,6 +22,11 @@ from typing import Any
 from pango_prediction.domain.series import last_complete_week_start
 
 CONTRACT_VERSION = "1.0"
+"""Pinned to what Pango Core sends, which is not what the service serves.
+
+The service is on 1.1 and accepts either, so these fixtures double as the proof
+that a 1.0 client keeps working. Raise this only when Core actually moves.
+"""
 HISTORY_END = date(2026, 11, 1)  # Sunday: the history ends on a complete week
 HORIZON = 4
 FREQUENCY = "WEEKLY"  # settings.forecast_granularity / forecast_runs.granularity
@@ -153,9 +158,10 @@ def request_payload(
         "frequency": FREQUENCY,
         "horizon": HORIZON,
         "history_end": HISTORY_END.isoformat(),
-        # Unresolved: whether closures are per request or per warehouse now that
-        # the grain is product x warehouse. Left empty on purpose.
-        "calendar": {"closed_dates": []},
+        # Resolved: closures are both, and they resolve as a union. Left empty
+        # here because an empty calendar is what Core sends before a tenant has
+        # configured one, which is the cold start the service has to handle.
+        "calendar": {"closed_dates": [], "closed_dates_by_warehouse": {}},
         "series": [series_payload(spec) for spec in specs],
     }
 

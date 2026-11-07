@@ -7,6 +7,7 @@ The service credential is required. A prediction service deployed without one
 would accept any caller, so loading fails loudly instead of starting open.
 """
 
+import logging
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -24,8 +25,10 @@ envelope; a client that ignores fields it does not know is unaffected.
 
 SERVICE_TOKEN_ENV = "PANGO_PREDICTION_SERVICE_TOKEN"
 MAX_SERIES_ENV = "PANGO_PREDICTION_MAX_SERIES_PER_REQUEST"
+LOG_LEVEL_ENV = "PANGO_PREDICTION_LOG_LEVEL"
 
 DEFAULT_MAX_SERIES_PER_REQUEST = 500
+DEFAULT_LOG_LEVEL = "INFO"
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +41,9 @@ class Settings:
 
     service_token: str
     max_series_per_request: int
+    log_level: str = DEFAULT_LOG_LEVEL
+    """Level for the service's own records, which the contract's section 20
+    request log is emitted at. Defaulted so a test need not supply it."""
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -65,7 +71,15 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if max_series < 1:
         raise RuntimeError(f"{MAX_SERIES_ENV} must be at least 1")
 
+    level = source.get(LOG_LEVEL_ENV, "").strip().upper() or DEFAULT_LOG_LEVEL
+
+    if level not in logging.getLevelNamesMapping():
+        raise RuntimeError(
+            f"{LOG_LEVEL_ENV} must be a logging level name, got {level!r}"
+        )
+
     return Settings(
         service_token=token,
         max_series_per_request=max_series,
+        log_level=level,
     )

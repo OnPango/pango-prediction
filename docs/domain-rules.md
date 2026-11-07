@@ -566,14 +566,16 @@ Listed rather than silently fixed, per the source-of-truth rule in `AGENTS.md`.
 | 2 | `README.md` shows the hexagonal layout in "Repository Structure" but `src/pango_forecast/models/` under "Models". | Internally inconsistent README. |
 | 3 | `README.md` development setup says `uv sync`, `uv run pytest`, `uv run mypy src`. `uv` is not installed and `src/` does not exist. | Stale. `AGENTS.md` has the working commands. |
 | 4 | `contract-v1.md` §11 lists four availability states including `SIN_SURTIDO`; `AGENTS.md` and `PREDICTION_CONTEXT.md` list three. | Resolved: four states, see §6. Identifier anglicised to `OUT_OF_ASSORTMENT`. |
-| 5 | `contract-v1.md` §8 carries `metadata.made_to_order`. No such column exists, and the notebook derives it. | Remove from the contract. |
-| 6 | `contract-v1.md` §13 lists only Mon–Fri / Sat / Sun / closed dates. Holy Saturday and the 1–6 January closure are missing. | Contract is incomplete. |
+| 5 | `contract-v1.md` §8 carried `metadata.made_to_order`. No such column exists, and the notebook derives it. | **Resolved.** Removed from the contract in 1.1, and the service rejects the field rather than ignoring it. |
+| 6 | `contract-v1.md` §13 listed only Mon-Fri / Sat / Sun / closed dates. Holy Saturday and the year-start closure were missing. | **Resolved.** §13 now states that Core must send *every* non-operational date and names those two, and the weight table became tenant calibration. |
 | 7 | `contract-v1.md` §9 encodes World Office document types. The schema generalises this via `movement_types.counts_as_demand`. | Contract should reference the column. |
 | 8 | `contract-v1.md` §10 assumes Pango Core can send daily closing stock. `stock_balances` holds current state only — there is no stock history table. | Real integration gap: Core must reconstruct daily stock by replaying `movements` and `movement_lines`. |
-| 9 | Documents describe 4 demand classes; the notebook produces 5. | See §8. |
+| 9 | Documents described 4 demand classes; the notebook produces 5, and the two ways classification fails need 6. | **Resolved.** `DemandClass` has the six values of Route A's enum; see §8. |
 | 10 | `forecasts` and `forecast_runs` have no column for `policy_version` or `model_version`, which `contract-v1.md` §14 returns and `architecture.md` §26 requires for traceability. | Schema gap to raise with Pango Core. |
 | 11 | Notebook cell 164 (a narrative cell) reports 2,222 products and 18.4 % stockouts, contradicting its own output and cell 166 (1,215 products, 5.2 %). | Stale narrative inside the notebook. The executed outputs and cell 166 are authoritative. |
 | 12 | The notebook's agreed parameters (13.2) declare `ventana_cuadrante_meses: 24`, but the cell that computes the quadrant (7.4) does not truncate: it runs from each series' first month of sale to the last complete month, up to 44 months for this dataset. | **Consequential and unresolved.** The two give different ADI and CV², so different classes and different models. Route B reproduces what was executed, since that is what produced the classes Route A evaluated, and exposes the window as a parameter defaulting to `None`. Route A must confirm. |
+| 13 | `contract-v1.md` §14's profile block had `observed_periods`, `nonzero_periods` and `short_history`, conflating the monthly classification grain with the weekly forecast grain and reducing three history classes to a boolean. | **Resolved.** 1.1 returns the implemented `DemandProfile`, with the two grains counted separately. |
+| 14 | `contract-v1.md` showed string identifiers and `frequency: "weekly"`; the tenant schema has integers and `WEEKLY`. | **Resolved** in 1.1. |
 
 ---
 
