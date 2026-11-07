@@ -12,6 +12,22 @@ def test_the_defaults_are_the_calibration_from_the_demand_analysis() -> None:
     assert DEFAULT_PARAMETERS.max_stockout_episode_weeks == 13
     assert DEFAULT_PARAMETERS.made_to_order_threshold == 0.5
     assert DEFAULT_PARAMETERS.min_weeks_with_stock_data == 4
+    assert DEFAULT_PARAMETERS.inactivity_weeks == 26
+    assert DEFAULT_PARAMETERS.new_history_max_weeks == 13
+    assert DEFAULT_PARAMETERS.limited_history_max_weeks == 52
+    assert DEFAULT_PARAMETERS.min_observed_weeks == 8
+    assert DEFAULT_PARAMETERS.weekday_weights == (1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 0.0)
+
+
+def test_the_classification_window_is_off_by_default() -> None:
+    """What the notebook evaluated, not what its parameter block declared.
+
+    The agreed parameters say `ventana_cuadrante_meses: 24`, but the cell that
+    computed the quadrant truncated nothing and ran over 44 months. The classes
+    every downstream decision used came from the whole history, so that is what
+    production reproduces until Route A resolves which one it meant.
+    """
+    assert DEFAULT_PARAMETERS.classification_window_months is None
 
 
 def test_parameters_are_immutable() -> None:
@@ -67,6 +83,14 @@ def test_changing_any_value_changes_the_fingerprint() -> None:
     assert DomainParameters(max_stockout_episode_weeks=8).fingerprint() != baseline
     assert DomainParameters(made_to_order_threshold=0.75).fingerprint() != baseline
     assert DomainParameters(min_weeks_with_stock_data=6).fingerprint() != baseline
+    assert DomainParameters(inactivity_weeks=13).fingerprint() != baseline
+    assert DomainParameters(new_history_max_weeks=8).fingerprint() != baseline
+    assert DomainParameters(limited_history_max_weeks=78).fingerprint() != baseline
+    assert DomainParameters(min_observed_weeks=12).fingerprint() != baseline
+    assert DomainParameters(classification_window_months=24).fingerprint() != baseline
+    assert (
+        DomainParameters(weekday_weights=(1.0,) * 7).fingerprint() != baseline
+    )
 
 
 def test_the_default_fingerprint_matches_the_documented_one() -> None:
@@ -76,14 +100,47 @@ def test_the_default_fingerprint_matches_the_documented_one() -> None:
     against it. If a default changes, this test fails and the document has to
     change in the same commit, instead of the hash drifting unnoticed.
     """
-    assert DEFAULT_PARAMETERS.fingerprint() == "8f7bb9c36953951c"
+    assert DEFAULT_PARAMETERS.fingerprint() == "bd4371bcce546b17"
 
 
 def test_the_fingerprint_does_not_depend_on_how_it_was_built() -> None:
     explicit = DomainParameters(
+        min_observed_weeks=8,
         min_weeks_with_stock_data=4,
         made_to_order_threshold=0.5,
+        limited_history_max_weeks=52,
+        new_history_max_weeks=13,
         max_stockout_episode_weeks=13,
+        inactivity_weeks=26,
+        classification_window_months=None,
+        weekday_weights=(1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 0.0),
     )
 
     assert explicit.fingerprint() == DEFAULT_PARAMETERS.fingerprint()
+
+
+def test_an_inactivity_window_below_one_week_is_rejected() -> None:
+    with pytest.raises(ValueError, match="inactivity_weeks"):
+        DomainParameters(inactivity_weeks=0)
+
+
+def test_limited_history_must_be_longer_than_new_history() -> None:
+    """Otherwise the LIMITED class could never be reached."""
+    with pytest.raises(ValueError, match="greater than"):
+        DomainParameters(new_history_max_weeks=20, limited_history_max_weeks=20)
+
+
+def test_requiring_fewer_than_one_observed_week_is_rejected() -> None:
+    with pytest.raises(ValueError, match="min_observed_weeks"):
+        DomainParameters(min_observed_weeks=0)
+
+
+def test_a_classification_window_of_zero_months_is_rejected() -> None:
+    """None means the whole history; zero would mean classifying on nothing."""
+    with pytest.raises(ValueError, match="classification_window_months"):
+        DomainParameters(classification_window_months=0)
+
+
+def test_a_full_week_is_derived_from_the_weight_table() -> None:
+    """Stored separately, the two could disagree about what 5.6 means."""
+    assert sum(DEFAULT_PARAMETERS.weekday_weights) == pytest.approx(5.6)

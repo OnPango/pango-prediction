@@ -290,7 +290,36 @@ Distribution over the weeks of history: 134 complete (5.6), 51 with one holiday 
 
 The variable must be computable for **future** weeks, since DeepAR consumes it as a known covariate (S34). The notebook exported it through the end of 2027 (66 weeks, 24 of them below 5.6).
 
-**Not yet implemented.** See the open decision in §12 about who computes Colombian public holidays.
+### Implemented as a rule plus data
+
+`domain/calendar.py` owns the **weight rule**: each weekday carries a weight, a non-operational date carries none, and a week is the sum. **Which dates are non-operational** is tenant data and arrives with the request, per warehouse. The service imports no holiday package and knows no country.
+
+The whole weekday table is a parameter (`DomainParameters.weekday_weights`), not a Saturday weight with the rest hardcoded, because a tenant that trades on Sundays needs a different table and not a different number. A full week is the sum of the table, derived rather than stored, so the two cannot disagree about what 5.6 means.
+
+### Would a country code be enough?
+
+Evaluated, and no - though it is worth having for a different job. A country answers only one of the four reasons the notebook gave a day zero weight:
+
+| Source of a closed day | Does a country code give it? |
+|---|---|
+| Public holidays (`co`) | **Yes** |
+| Year-start closure (`cierre`) | No. Company-specific; the notebook had to learn it from the data |
+| Holy Saturday | No. Explicitly not an official Colombian holiday (11.2 B) |
+| Differences between warehouses | No. Route A's own reply asks for `closed_dates` per `warehouse_id` |
+
+What it misses is also what matters most: a public holiday takes a week from 5.6 to 4.6, while the year-start closure takes it to 0. Three further costs:
+
+1. **Sub-national holidays.** Colombia's are national, so a country code happens to work for this tenant. Spain, Mexico or the United States need a subdivision, and warehouses in different regions need different calendars.
+2. **Parity becomes a dependency.** If the service derives dates from a package, Route A must use the same package, the same version and the same subdivision flags; any drift changes the covariate silently. With dates as data, parity is "did both read the same list", auditable with a hash like `params_version`.
+3. **Holiday law changes.** A pinned package is reproducible but ages; an unpinned one breaks parity.
+
+**Where a country code does belong:** onboarding. A new tenant has no configured calendar - §11 notes that cold start is the normal state - so `country` plus `subdivision` can *draft* its closed-date list, which the company then corrects by adding its own shutdown and removing days it does work. The forecast service reads the final list. Drafting a calendar and reading one are different jobs.
+
+### An asymmetry in the notebook's covariate
+
+The notebook derived `cierre` from history: business days with no sales between 26 December and 10 January, over 2022-2025. That cannot be evaluated for a future year, so `x in cierre` is false for every horizon week. Its future year-ends therefore scored a full week while its historical ones scored nearly nothing - a skew in a variable DeepAR consumes as *known*.
+
+Route B's value depends only on the week and the supplied dates, so history and horizon are computed by one rule. Matching the notebook on history then requires Core to be seeded with the dates `cierre` contained, which is why **that learned set should be exported from the notebook** rather than re-derived.
 
 ---
 
@@ -309,7 +338,9 @@ At weekly grain almost nothing looks like stable demand. Aggregated monthly, hal
 
 A month counts as unobservable when half or more of its days fall in a stockout; 4.4 % of months.
 
-Classification window: the 24 months before the cutoff, recomputed at every cutoff.
+Classification window: **the whole history from each series' first month of sale**, recomputed at every cutoff.
+
+This corrects an earlier reading of this document. The agreed parameter block (13.2) declares `ventana_cuadrante_meses: 24`, but the cell that computes the quadrant (7.4) truncates nothing: it builds `period_range(first_month_of_sale, ULT_MES)`, which over data running from January 2023 to August 2026 is up to 44 months. The classes that drove `destino`, the pilot and every downstream decision were therefore computed over the whole history. Production reproduces that, and `DomainParameters.classification_window_months` defaults to `None`. See §14 #12.
 
 ### Quadrants — Syntetos & Boylan
 
@@ -347,10 +378,20 @@ Because the data ends in September, a product that only sells in October–Decem
 
 ### Fields the profile must carry
 
-The current `DemandProfile` has `observed_periods`, `nonzero_periods`, `adi`, `cv2`, `demand_class`, `inactive`, `short_history`. The routing in §9 additionally needs:
+`DemandProfile` carries `demand_class`, `history_class`, `stock_handling`, `adi`, `cv2`, `observable_months`, `nonzero_months`, `history_weeks`, `observed_weeks`, `weeks_since_last_sale`, `inactive` and `evaluable`, computed by `domain/profile.py`.
 
-- `stock_handling` — the S24 class (`con_stock` / `bajo_pedido` / `sin_dato`)
-- `seasonal` — the `temporada` flag
+Four of the five routing dimensions of §9 are therefore available: activity, history class, monthly quadrant and stock handling. The fifth is still missing:
+
+- `seasonal` — the `temporada` flag of the seasonal rescue (7.5 C). Not implemented, and not only for want of time: the rule hardcodes October-December, which is a calibration of one Colombian catalogue rather than a platform rule. It needs a tenant-scoped quarter before it can be written.
+
+Two classes answer the two different ways classification fails, which the earlier five-class proposal conflated:
+
+| Class | Meaning | Notebook |
+|---|---|---|
+| `INSUFFICIENT` | There is a monthly series; its statistics cannot be computed from it | `insuficiente` |
+| `NOT_CLASSIFIABLE` | There is no monthly series: every month was spent in a stockout | `sin serie mensual` |
+
+Both values exist in Route A's `demand_class` enum, so this mapping needs its confirmation rather than new enum values.
 
 ---
 
@@ -435,20 +476,22 @@ The parameters travel with the versioned policy artifact, which Route A defined 
 the fields as JSON, keys sorted, no whitespace -> SHA-256 -> first 16 hex characters
 ```
 
-For the current defaults that is `8f7bb9c36953951c`. **Both routes must agree on this recipe**; if Route A hashes differently, the two fingerprints will never match and the audit is worthless.
+For the current defaults that is `bd4371bcce546b17`. **Both routes must agree on this recipe**; if Route A hashes differently, the two fingerprints will never match and the audit is worthless.
 
 ### Parameters still to join it
 
 Only the three the code reads today are fields. The rest join `DomainParameters` as the module that reads them is built, and the policy artifact should plan for them:
 
-| Parameter | Value | Source | Needs |
+`profile.py` added four of them plus the classification window, so eight of the calibrated values are now fields. What is left:
+
+`profile.py` and `calendar.py` absorbed the rest. Two entries left, and neither is simply pending:
+
+| Parameter | Value | Source | Status |
 |---|---|---|---|
-| Inactivity window | 26 weeks | S29 | `profile.py` |
-| New / limited history | 13 / 52 weeks | E5 | `profile.py` |
-| Minimum observed weeks | 8 | E1 | `profile.py` |
-| Saturday weight | 0.6 | S34 | `calendar.py` |
-| Year-start closure | 30 Dec – 6 Jan | S34 | `calendar.py` |
-| Horizon | 4 weeks | 8.2 | the policy already carries `horizon_weeks` |
+| Seasonal rescue quarter | Oct-Dec, 2+ years, 50 %+ | 7.5 C | Needs a tenant-scoped quarter before the rule can be written at all |
+| Horizon | 4 weeks | 8.2 | Already carried by the policy as `horizon_weeks` |
+
+The year-start closure and the public holidays left this table rather than joining it: they are **dates**, which are request data, not calibration. Only the weight rule is calibration.
 
 ### Cold start is the normal state for a new tenant
 
@@ -469,23 +512,23 @@ Scope is from §11: a platform rule holds for every tenant, a calibration does n
 | Week start | Monday | 7.0, 7.1 | platform | `week_start()` |
 | Frequency | weekly (`W-MON`) | 13.2 | platform | implicit |
 | Stock tolerance | `1e-6` | notebook `TOL` | platform | `STOCK_TOLERANCE` |
-| ADI cutoff | 1.32 | Syntetos & Boylan, 9.1 | platform | not yet |
-| CV² cutoff | 0.49 | Syntetos & Boylan, 9.1 | platform | not yet |
-| Classification grain | monthly | S27 | platform | not yet |
+| ADI cutoff | 1.32 | Syntetos & Boylan, 9.1 | platform | `ADI_CUTOFF` |
+| CV² cutoff | 0.49 | Syntetos & Boylan, 9.1 | platform | `CV2_CUTOFF` |
+| Classification grain | monthly | S27 | platform | `build_monthly_series()` |
 | Max stockout episode | 13 weeks | S26 | tenant | `DomainParameters.max_stockout_episode_weeks` |
 | Made-to-order threshold | 0.5 | S24 | tenant | `DomainParameters.made_to_order_threshold` |
 | Min weeks with stock data | 4 | S24 | tenant | `DomainParameters.min_weeks_with_stock_data` |
 | Horizon | 4 weeks | 8.2 | tenant | the policy's `horizon_weeks` |
-| Inactivity window | 26 weeks | S29 | tenant | not yet |
-| New product | ≤ 13 weeks | E5 | tenant | not yet |
-| Limited history | 14–52 weeks | E5 | tenant | not yet |
-| Min observed weeks to forecast | 8 (= 2 × H) | E1 | tenant | not yet |
-| Classification window | 24 months | S30 | tenant | not yet |
-| Saturday weight | 0.6 | 11.3, 11.4 | tenant | not yet |
-| Full week business days | 5.6 | 11.4 | tenant | not yet |
-| Year-start closure | 30 Dec – 6 Jan | S34 | tenant | not yet |
-| Public holidays | Colombia, for this tenant | S34 | tenant | not yet, and unresolved: see §13 |
-| Seasonal rescue | ≥ 2 years and ≥ 50 % in Oct–Dec | 7.5 C | tenant | not yet |
+| Inactivity window | 26 weeks | S29 | tenant | `DomainParameters.inactivity_weeks` |
+| New product | ≤ 13 weeks | E5 | tenant | `DomainParameters.new_history_max_weeks` |
+| Limited history | 14–52 weeks | E5 | tenant | `DomainParameters.limited_history_max_weeks` |
+| Min observed weeks to forecast | 8 (= 2 × H) | E1 | tenant | `DomainParameters.min_observed_weeks` |
+| Classification window | whole history (declared 24 months) | S30, 13.2 | tenant | `DomainParameters.classification_window_months`, default `None`; see §14 #12 |
+| Weekday weight table | Mon-Fri 1.0, Sat 0.6, Sun 0 | 11.3, 11.4 | tenant | `DomainParameters.weekday_weights` |
+| Full week business days | 5.6 | 11.4 | derived | `full_week_business_days()`, the sum of the table |
+| Year-start closure | 30 Dec - 6 Jan | S34 | tenant **data** | arrives as `closed_dates`; see §7 |
+| Public holidays | per tenant and warehouse | S34 | tenant **data** | arrives as `closed_dates`; see §7 |
+| Seasonal rescue | 2+ years and 50 %+ in Oct-Dec | 7.5 C | tenant | not yet, and needs a tenant-scoped quarter |
 | Interval quantiles | 0.10 / 0.90 | Route A | tenant | the policy's `interval` |
 | Evaluation blocks | 13 (1–7 selection, 8–13 report) | 13.2 | tenant | Route A only |
 | Likelihood | NegativeBinomial | S18 | tenant | Route A only |
@@ -500,13 +543,16 @@ Every parameter marked `tenant` that is not yet a field of `DomainParameters` is
 
    The resolution is to split the two things that were conflated. The **weight table** (Monday–Friday 1.0, Saturday per tenant, Sunday 0, closed 0) is a domain rule and stays in shared code. **Which dates are closed** is tenant data and comes in the request. Parity is preserved by sharing the rule, not by sharing the holiday computation, so Route A's notebook reads the same closed-date list Core sends.
 
-   *Recommended:* Core sends every non-operational date; the service takes no holiday dependency.
-2. **Year-start closure for future years.** The notebook assumed 1–6 January; Route A's reply says 30 December – 6 January. Immaterial if Core sends the dates, which is the recommendation above. Still pending confirmation by the company.
+   *Decided and implemented.* Core sends every non-operational date; the service takes no holiday dependency. A country code was evaluated as an alternative and rejected for the forecast path, because it covers only public holidays and misses the company closure, Holy Saturday and per-warehouse differences; it is useful instead for drafting a new tenant's calendar at onboarding. The full evaluation is in §7.
+2. **Year-start closure for future years.** The notebook assumed 1-6 January; Route A's reply says 30 December - 6 January. Immaterial to the service now that Core sends the dates, but the company still has to confirm the rule so Core can generate them. Separately, the notebook's learned `cierre` set should be exported so Core's history matches what was evaluated; see §7.
 3. **`demand_class` and `model` enum values.** Per-tenant enums, not yet created. §8 carries a proposal.
 4. **What happens to the `INSUFFICIENT` class in production.** 44 % of products, 3.8 % of units.
 5. **Policy format.** Must express the five-dimension routing of §9 and a "no forecast" outcome.
 6. **`UNKNOWN` and the mask.** Resolved in favour of the notebook (`mask = 1`, treated as observed) to preserve parity. Revisit only together with Route A.
-7. **Prediction intervals.** `forecast_periods.lower_bound` and `upper_bound` are `NOT NULL`, so intervals are mandatory. `ForecastPeriod` does not carry them yet.
+7. ~~**Prediction intervals.**~~ Closed. `ForecastPeriod` carries `lower` and `upper`, validated to contain the estimate, and `domain/intervals.py` computes them from empirical residual quantiles at Route A's 0.10 / 0.90.
+8. **The classification window.** Declared as 24 months, computed over the whole history. Route A has to say which one the policy means; see §14 #12.
+9. **`INSUFFICIENT` against `NOT_CLASSIFIABLE`.** §8 proposes a mapping onto Route A's two enum values. Needs confirmation.
+10. **`zero` is not in Route A's model enum.** It is the benchmark every model must beat, and it is the natural forecast for an inactive series, but no policy rule can currently name it.
 
 ---
 
@@ -520,13 +566,16 @@ Listed rather than silently fixed, per the source-of-truth rule in `AGENTS.md`.
 | 2 | `README.md` shows the hexagonal layout in "Repository Structure" but `src/pango_forecast/models/` under "Models". | Internally inconsistent README. |
 | 3 | `README.md` development setup says `uv sync`, `uv run pytest`, `uv run mypy src`. `uv` is not installed and `src/` does not exist. | Stale. `AGENTS.md` has the working commands. |
 | 4 | `contract-v1.md` §11 lists four availability states including `SIN_SURTIDO`; `AGENTS.md` and `PREDICTION_CONTEXT.md` list three. | Resolved: four states, see §6. Identifier anglicised to `OUT_OF_ASSORTMENT`. |
-| 5 | `contract-v1.md` §8 carries `metadata.made_to_order`. No such column exists, and the notebook derives it. | Remove from the contract. |
-| 6 | `contract-v1.md` §13 lists only Mon–Fri / Sat / Sun / closed dates. Holy Saturday and the 1–6 January closure are missing. | Contract is incomplete. |
+| 5 | `contract-v1.md` §8 carried `metadata.made_to_order`. No such column exists, and the notebook derives it. | **Resolved.** Removed from the contract in 1.1, and the service rejects the field rather than ignoring it. |
+| 6 | `contract-v1.md` §13 listed only Mon-Fri / Sat / Sun / closed dates. Holy Saturday and the year-start closure were missing. | **Resolved.** §13 now states that Core must send *every* non-operational date and names those two, and the weight table became tenant calibration. |
 | 7 | `contract-v1.md` §9 encodes World Office document types. The schema generalises this via `movement_types.counts_as_demand`. | Contract should reference the column. |
 | 8 | `contract-v1.md` §10 assumes Pango Core can send daily closing stock. `stock_balances` holds current state only — there is no stock history table. | Real integration gap: Core must reconstruct daily stock by replaying `movements` and `movement_lines`. |
-| 9 | Documents describe 4 demand classes; the notebook produces 5. | See §8. |
+| 9 | Documents described 4 demand classes; the notebook produces 5, and the two ways classification fails need 6. | **Resolved.** `DemandClass` has the six values of Route A's enum; see §8. |
 | 10 | `forecasts` and `forecast_runs` have no column for `policy_version` or `model_version`, which `contract-v1.md` §14 returns and `architecture.md` §26 requires for traceability. | Schema gap to raise with Pango Core. |
 | 11 | Notebook cell 164 (a narrative cell) reports 2,222 products and 18.4 % stockouts, contradicting its own output and cell 166 (1,215 products, 5.2 %). | Stale narrative inside the notebook. The executed outputs and cell 166 are authoritative. |
+| 12 | The notebook's agreed parameters (13.2) declare `ventana_cuadrante_meses: 24`, but the cell that computes the quadrant (7.4) does not truncate: it runs from each series' first month of sale to the last complete month, up to 44 months for this dataset. | **Consequential and unresolved.** The two give different ADI and CV², so different classes and different models. Route B reproduces what was executed, since that is what produced the classes Route A evaluated, and exposes the window as a parameter defaulting to `None`. Route A must confirm. |
+| 13 | `contract-v1.md` §14's profile block had `observed_periods`, `nonzero_periods` and `short_history`, conflating the monthly classification grain with the weekly forecast grain and reducing three history classes to a boolean. | **Resolved.** 1.1 returns the implemented `DemandProfile`, with the two grains counted separately. |
+| 14 | `contract-v1.md` showed string identifiers and `frequency: "weekly"`; the tenant schema has integers and `WEEKLY`. | **Resolved** in 1.1. |
 
 ---
 

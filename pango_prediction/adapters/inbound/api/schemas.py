@@ -31,9 +31,27 @@ class StockRow(_Schema):
 
 
 class CalendarSpec(_Schema):
-    # Unresolved: whether closures are per request or per warehouse now that the
-    # grain is product x warehouse. See docs/domain-rules.md §12.
-    closed_dates: list[date] = Field(default_factory=list)
+    """The dates the tenant does not operate.
+
+    Two levels, because closures are not all of one kind: a public holiday or a
+    company shutdown closes everything, while an inventory count closes one
+    warehouse. They resolve as a union, so a warehouse cannot re-open a day the
+    tenant declared closed. This settles the question this class used to carry
+    as a comment; see `docs/domain-rules.md` §7.
+
+    The service computes no holidays and knows no country. A country code would
+    cover the public holidays and miss the company shutdown, Holy Saturday and
+    every per-warehouse difference, so the dates are data.
+    """
+
+    closed_dates: list[date] = Field(
+        default_factory=list,
+        description="Non-operational dates for every warehouse",
+    )
+    closed_dates_by_warehouse: dict[int, list[date]] = Field(
+        default_factory=dict,
+        description="Extra non-operational dates, keyed by warehouses.id",
+    )
 
 
 class SeriesRequest(_Schema):
@@ -46,7 +64,9 @@ class SeriesRequest(_Schema):
 
 
 class ForecastRequest(_Schema):
-    contract_version: Literal["1.0"]
+    contract_version: Literal["1.0", "1.1"] = Field(
+        description="1.0 is still accepted: the 1.1 additions are additive"
+    )
     request_id: str = Field(min_length=1)
     forecast_run_id: int = Field(description="forecast_runs.id")
     frequency: Literal["WEEKLY"]
@@ -77,12 +97,43 @@ class SeriesErrorResponse(_Schema):
     message: str
 
 
+class ProfileResponse(_Schema):
+    """What the series' demand behaves like, not which model will handle it.
+
+    Returned even when the series cannot be forecast, because it is the answer
+    to "why" - and for an inactive or unclassifiable series it is the whole of
+    what the service has to say.
+    """
+
+    demand_class: str
+    history_class: str
+    stock_handling: str
+    adi: float | None = Field(
+        description="Observable months per month with a sale; null if none sold"
+    )
+    cv2: float | None = Field(
+        description="Squared CV of the non-zero monthly demands; null below two"
+    )
+    observable_months: int
+    nonzero_months: int
+    history_weeks: int
+    observed_weeks: int
+    weeks_since_last_sale: int
+    inactive: bool
+    evaluable: bool
+
+
 class SeriesResultResponse(_Schema):
     series_id: int
     status: Literal["ok", "error"]
     periods: list[PeriodResponse] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     error: SeriesErrorResponse | None = None
+    profile: ProfileResponse | None = None
+    horizon_business_days: list[float] = Field(
+        default_factory=list,
+        description="Equivalent business days of each week being forecast",
+    )
 
 
 class SummaryResponse(_Schema):

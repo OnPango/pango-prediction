@@ -66,3 +66,28 @@ def test_the_module_does_not_depend_on_the_process_environment() -> None:
     )
 
     assert settings.service_token == "token-2026-11-06"
+
+
+# --- the log level (contract section 20) ---
+
+
+def test_the_log_level_defaults_to_info() -> None:
+    settings = load_settings({SERVICE_TOKEN_ENV: "token"})
+
+    assert settings.log_level == "INFO"
+
+
+def test_the_log_level_is_read_and_upper_cased() -> None:
+    settings = load_settings(
+        {SERVICE_TOKEN_ENV: "token", "PANGO_PREDICTION_LOG_LEVEL": "debug"}
+    )
+
+    assert settings.log_level == "DEBUG"
+
+
+def test_a_level_that_is_not_a_level_is_refused() -> None:
+    """Silently falling back would hide the contract's request log."""
+    with pytest.raises(RuntimeError, match="logging level name"):
+        load_settings(
+            {SERVICE_TOKEN_ENV: "token", "PANGO_PREDICTION_LOG_LEVEL": "verbose"}
+        )

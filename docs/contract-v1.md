@@ -63,11 +63,30 @@ Every request includes:
 
 ```json
 {
-  "contract_version": "1.0"
+  "contract_version": "1.1"
 }
 ```
 
 Backward-compatible additions may remain in `1.x`. Breaking changes require a new major version.
+
+**The service serves `1.1` and accepts a request declaring `1.0` or `1.1`.** Everything 1.1 added is additive, so a 1.0 client that ignores response fields it does not know keeps working unchanged.
+
+### What changed in 1.1
+
+| Change | Where |
+|---|---|
+| `results[].profile` is returned for every series that got far enough, including one that cannot be forecast | section 14 |
+| `results[].horizon_business_days` reports the calendar covariate per forecast week | sections 13, 14 |
+| `calendar.closed_dates_by_warehouse` accepts closures for one warehouse | section 13 |
+
+### Corrections to the 1.0 text
+
+These were already wrong rather than newly changed, and are recorded as discrepancies in `docs/domain-rules.md` section 14:
+
+- identifiers are **integers**, not strings: `product_warehouses.id`, `products.id`, `warehouses.id` and `forecast_runs.id` are all integers in the tenant schema;
+- `frequency` is `"WEEKLY"`, the schema's enum casing;
+- `metadata.made_to_order` does not exist and is **rejected**. No such column exists, and the service derives stock handling from the series' own history (notebook S24). Sending it fails validation, because unknown fields are refused rather than ignored - a contract drift should surface, not pass silently;
+- the `profile` block's field names changed, because 1.0 conflated the two grains it is computed on. See section 14.
 
 ## 4. Authentication
 
@@ -108,23 +127,25 @@ Content-Type: application/json
 
 ```json
 {
-  "contract_version": "1.0",
+  "contract_version": "1.1",
   "request_id": "req-123",
-  "forecast_run_id": "run-123",
-  "frequency": "weekly",
+  "forecast_run_id": 41,
+  "frequency": "WEEKLY",
   "horizon": 4,
-  "history_end": "2026-11-02",
+  "history_end": "2026-11-01",
   "calendar": {
-    "closed_dates": []
+    "closed_dates": ["2026-11-16"],
+    "closed_dates_by_warehouse": {
+      "3": ["2026-11-02"]
+    }
   },
   "series": [
     {
-      "series_id": "pw-7a8b",
-      "product_id": "prod-123",
-      "warehouse_id": "wh-baq",
+      "series_id": 1198,
+      "product_id": 742,
+      "warehouse_id": 3,
       "metadata": {
-        "group2": "REPUESTOS",
-        "made_to_order": false
+        "group2": "REPUESTOS"
       },
       "demand": [
         {
@@ -160,34 +181,41 @@ No observation after `history_end` may be used.
 
 ### `series_id`
 
-Required.
+Required. An integer: `product_warehouses.id`.
 
 ```text
 series_id = product_warehouse_id
 ```
 
-Forecast Service treats it as opaque.
+Forecast Service treats it as opaque. The domain keeps it a string so the same
+code serves either forecast grain; the conversion happens at the HTTP edge.
 
 ### `product_id`
 
-Required for traceability.
+Required for traceability. An integer: `products.id`.
 
 ### `warehouse_id`
 
-Required for traceability.
+Required. An integer: `warehouses.id`.
+
+Not only for traceability any more: it selects the warehouse's closed dates,
+so a wrong value gives the series the wrong calendar.
 
 ### `metadata`
 
-Optional.
-
-Initial supported fields:
+Optional, and free-form.
 
 ```json
 {
-  "group2": "...",
-  "made_to_order": false
+  "group2": "REPUESTOS"
 }
 ```
+
+**No `made_to_order`.** There is no such column, and a flag would compete with
+what the service derives from the series' own stock history (notebook S24): the
+notebook finds 332 series sold to order, while only 13 are routed to an
+aggregated forecast for it. Sending the field fails validation rather than being
+ignored, so the mismatch surfaces during integration instead of in production.
 
 ## 9. Demand observations
 
@@ -268,62 +296,130 @@ Do not rely on ambiguous default `W-MON` behavior.
 
 ## 13. Business-day feature
 
-Current convention:
+Equivalent business days per week, returned as `results[].horizon_business_days`, one value per week being forecast.
+
+The **weight rule** is shared domain code, the same in the benchmark and in production:
 
 ```text
-Monday–Friday = 1.0
+weekday weight  = from the tenant's table
+closed date     = 0.0
+week            = the sum of its seven days
+```
+
+The default table is EquipMaster's, and a full week is its sum:
+
+```text
+Monday-Friday = 1.0
 Saturday      = 0.6
 Sunday        = 0.0
-closed date   = 0.0
+full week     = 5.6
 ```
+
+The whole table is tenant calibration, not a Saturday weight with the rest fixed: a tenant closed on Saturdays needs 0, and one that trades on Sundays needs a different table.
+
+**Which dates are closed is data, and Pango Core sends it:**
+
+```json
+"calendar": {
+  "closed_dates": ["2026-11-16"],
+  "closed_dates_by_warehouse": { "3": ["2026-11-02"] }
+}
+```
+
+`closed_dates` applies to every warehouse; `closed_dates_by_warehouse` adds to it for one. They resolve as a union, so a warehouse cannot re-open a day the tenant declared closed.
+
+Core must send every non-operational date, not only public holidays: the company shutdown around the year end, Holy Saturday (not an official Colombian holiday, yet the company does not invoice), inventory counts, and any local closure. **The service computes no holidays and takes no country.** A country code would cover the public holidays and miss all of the above, and it would make parity depend on both routes pinning the same holiday package rather than on reading the same list. The reasoning is in `docs/domain-rules.md` section 7.
+
+The feature is known into the future by construction, since it reads only the dates and the tenant's table, which is what lets the horizon carry the same covariate as the history.
 
 ## 14. Forecast response
 
+Captured from the running service, not written by hand. Series 1198 is sold to order and could be profiled; series 1500 sent a negative quantity and could not.
+
 ```json
 {
-  "contract_version": "1.0",
+  "contract_version": "1.1",
   "service_version": "0.1.0",
-  "policy_version": "2026-11-v1",
-  "request_id": "req-123",
-  "forecast_run_id": "run-123",
+  "policy_version": null,
+  "request_id": "req-2026-11-02-0001",
+  "forecast_run_id": 41,
   "summary": {
-    "total": 1,
-    "ok": 1,
-    "error": 0
+    "total": 2,
+    "ok": 0,
+    "error": 2
   },
   "results": [
     {
-      "series_id": "pw-7a8b",
-      "status": "ok",
-      "profile": {
-        "demand_class": "intermittent",
-        "adi": 2.8,
-        "cv2": 0.62,
-        "observed_periods": 52,
-        "nonzero_periods": 19,
-        "short_history": false,
-        "inactive": false
-      },
-      "model": {
-        "name": "tsb",
-        "implementation": "statsforecast",
-        "library_version": "2.1.1",
-        "model_version": "tsb-default-v1",
-        "params": {}
-      },
-      "periods": [
-        {
-          "period_start": "2026-11-09",
-          "estimate": 2.4,
-          "lower": 0.0,
-          "upper": 5.1
-        }
+      "series_id": 1198,
+      "status": "error",
+      "periods": [],
+      "warnings": [
+        "The series is sold to order, so zero stock was not read as a stockout."
       ],
-      "warnings": []
+      "error": {
+        "code": "MODEL_NOT_AVAILABLE",
+        "message": "No forecasting model is deployed yet: the model policy and the model implementations are not part of this release."
+      },
+      "profile": {
+        "demand_class": "SMOOTH",
+        "history_class": "LIMITED",
+        "stock_handling": "MADE_TO_ORDER",
+        "adi": 1.0,
+        "cv2": 0.13999999999999999,
+        "observable_months": 5,
+        "nonzero_months": 5,
+        "history_weeks": 22,
+        "observed_weeks": 22,
+        "weeks_since_last_sale": 0,
+        "inactive": false,
+        "evaluable": true
+      },
+      "horizon_business_days": [
+        4.6,
+        5.6,
+        4.6,
+        5.6
+      ]
+    },
+    {
+      "series_id": 1500,
+      "status": "error",
+      "periods": [],
+      "warnings": [],
+      "error": {
+        "code": "INVALID_SERIES",
+        "message": "Demand quantity cannot be negative"
+      },
+      "profile": null,
+      "horizon_business_days": []
     }
   ]
 }
 ```
+
+`profile` is returned whenever the series got far enough to be profiled, **including when it cannot be forecast**: for an inactive or unclassifiable series it is the whole of what the service has to say. It is `null` only when the series failed before that, as 1500 did.
+
+### The profile block
+
+| Field | Meaning |
+|---|---|
+| `demand_class` | `SMOOTH`, `ERRATIC`, `INTERMITTENT`, `LUMPY`, `INSUFFICIENT` or `NOT_CLASSIFIABLE`. Computed on the **monthly** series (notebook S27) |
+| `history_class` | `NEW`, `LIMITED` or `MATURE`, from the length of the **weekly** series |
+| `stock_handling` | `STOCK_MANAGED`, `MADE_TO_ORDER` or `NOT_CLASSIFIABLE`, derived from the series' own stock history (S24) |
+| `adi` | Observable months per month with a sale. `null` when nothing sold |
+| `cv2` | Squared coefficient of variation of the non-zero monthly demands. `null` below two such months, which is why `INSUFFICIENT` exists |
+| `observable_months`, `nonzero_months` | The classification grid, after dropping months spent in a stockout |
+| `history_weeks`, `observed_weeks` | The weekly series, and how much of it can be read as demand |
+| `weeks_since_last_sale`, `inactive` | Activity (S29) |
+| `evaluable` | Whether there are enough observable weeks to forecast the series on its own (E1) |
+
+The monthly and the weekly counts disagree on purpose: classification happens monthly and forecasting happens weekly, because at weekly grain 91.9 % of periods are zero and almost nothing looks like stable demand.
+
+**This replaces 1.0's profile block**, which had `observed_periods`, `nonzero_periods` and `short_history`. Those conflated the two grains into one pair of counters and reduced three history classes to a boolean. The `demand_class` values are also upper case, matching Route A's enum.
+
+### Not yet populated
+
+`periods` is always empty and `policy_version` is always `null`, because no model policy is deployed. The envelope carries both so that Core can integrate against the final shape. A `model` block does not appear at all yet, for the same reason.
 
 ## 15. DeepAR metadata
 

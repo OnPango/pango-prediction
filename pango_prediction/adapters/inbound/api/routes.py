@@ -10,7 +10,9 @@ form, and it is what lets a test run the API against its own settings without
 touching the environment.
 """
 
+import logging
 import secrets
+import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header
@@ -23,6 +25,7 @@ from pango_prediction.adapters.inbound.api.schemas import (
     ForecastRequest,
     ForecastResponse,
     HealthResponse,
+    ProfileResponse,
     SeriesErrorResponse,
     SeriesRequest,
     SeriesResultResponse,
@@ -39,11 +42,23 @@ from pango_prediction.config import (
     SERVICE_VERSION,
     Settings,
 )
+from pango_prediction.domain.calendar import ClosedDates
 from pango_prediction.domain.types import (
     DemandObservation,
+    DemandProfile,
     ForecastSeriesInput,
     StockObservation,
 )
+
+logger = logging.getLogger(__name__)
+"""Named after this module, with no handler attached here.
+
+A module that called ``basicConfig`` would reshape the logging of whatever
+imported it. The handler is attached once by `main.configure_logging`, at the
+composition root, because uvicorn configures only its own loggers and leaves
+the root one without any - so these records would otherwise be dropped at
+root's default WARNING.
+"""
 
 
 def to_series_input(series: SeriesRequest) -> ForecastSeriesInput:
@@ -69,11 +84,47 @@ def to_series_input(series: SeriesRequest) -> ForecastSeriesInput:
     )
 
 
+def to_closed_dates(request: ForecastRequest) -> ClosedDates:
+    """Map the calendar block onto the domain value object.
+
+    Warehouse keys become strings here for the same reason ``series_id`` does:
+    the schema numbers its warehouses, the domain treats the identifier as
+    opaque, and the conversion belongs at the edge.
+    """
+    return ClosedDates.of(
+        everywhere=request.calendar.closed_dates,
+        by_warehouse={
+            str(warehouse_id): dates
+            for warehouse_id, dates in request.calendar.closed_dates_by_warehouse.items()
+        },
+    )
+
+
 def to_command(request: ForecastRequest) -> ForecastCommand:
     return ForecastCommand(
         history_end=request.history_end,
         horizon=request.horizon,
         series=tuple(to_series_input(series) for series in request.series),
+        closed_dates=to_closed_dates(request),
+        # The tenant's calibration will arrive with the policy artifact. Until
+        # then the command's own default applies, which is EquipMaster's.
+    )
+
+
+def to_profile(profile: DemandProfile) -> ProfileResponse:
+    return ProfileResponse(
+        demand_class=profile.demand_class.value,
+        history_class=profile.history_class.value,
+        stock_handling=profile.stock_handling.value,
+        adi=profile.adi,
+        cv2=profile.cv2,
+        observable_months=profile.observable_months,
+        nonzero_months=profile.nonzero_months,
+        history_weeks=profile.history_weeks,
+        observed_weeks=profile.observed_weeks,
+        weeks_since_last_sale=profile.weeks_since_last_sale,
+        inactive=profile.inactive,
+        evaluable=profile.evaluable,
     )
 
 
@@ -88,6 +139,8 @@ def to_series_result(
         # envelope so Pango Core can integrate against the final shape.
         periods=[],
         warnings=list(outcome.warnings),
+        profile=(None if outcome.profile is None else to_profile(outcome.profile)),
+        horizon_business_days=list(outcome.horizon_business_days),
         error=(
             None
             if outcome.error is None
@@ -153,12 +206,49 @@ def build_router(settings: Settings, service: ForecastService) -> APIRouter:
                 settings.max_series_per_request,
             )
 
+        started = time.perf_counter()
         batch = service.run(to_command(request))
+        duration_ms = (time.perf_counter() - started) * 1000
 
         results = [
             to_series_result(series.series_id, outcome)
             for series, outcome in zip(request.series, batch.outcomes, strict=True)
         ]
+
+        if batch.error_count == 0:
+            status = "ok"
+        elif batch.ok_count == 0:
+            status = "error"
+        else:
+            status = "partial"
+
+        # Contract section 20. The fields go in the message so that they are
+        # greppable under uvicorn's plain formatter, and in `extra` so that a
+        # structured handler can read them without parsing the text.
+        #
+        # Nothing from the payload is logged: section 20 forbids logging full
+        # histories, and a batch of 500 series would otherwise write megabytes
+        # of a tenant's sales per request.
+        #
+        # `model_name` and `model_version` are null because no policy is
+        # deployed. They are also mis-placed by the contract: once a policy
+        # exists the model is chosen per series, not per request, so they will
+        # belong to a per-series record rather than to this one.
+        fields = {
+            "request_id": request.request_id,
+            "forecast_run_id": request.forecast_run_id,
+            "series_count": len(results),
+            "policy_version": batch.policy_version,
+            "model_name": None,
+            "model_version": None,
+            "duration_ms": round(duration_ms, 1),
+            "status": status,
+        }
+
+        logger.info(
+            " ".join(f"{key}={value}" for key, value in fields.items()),
+            extra=fields,
+        )
 
         return ForecastResponse(
             contract_version=CONTRACT_VERSION,

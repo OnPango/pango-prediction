@@ -110,6 +110,35 @@ def _available_quantity(closing_stock: float) -> float:
     return max(closing_stock, 0.0)
 
 
+def observed_demand(
+    series: RegularizedSeries,
+    availability: WeeklyAvailability,
+) -> tuple[float, ...]:
+    """Demand of the weeks that can be read as real demand (notebook S31).
+
+    Masked weeks are dropped and what remains is joined into a shorter series.
+    That is what the notebook does before fitting a non-seasonal model: a
+    stockout week is a missing observation, not a zero, and feeding the zero in
+    would pull every forecast down.
+
+    A seasonal model must **not** use this. It needs the calendar alignment, and
+    the notebook handles its gaps block by block instead.
+    """
+    if len(series.dates) != len(availability.dates):
+        raise ValueError("the series and its availability must share one grid")
+
+    if series.series_id != availability.series_id:
+        raise ValueError("the series and its availability must be the same series")
+
+    return tuple(
+        value
+        for value, available in zip(
+            series.values, availability.available_mask, strict=True
+        )
+        if available
+    )
+
+
 def _classify_stock_handling(
     values: tuple[float, ...],
     opening_stock: tuple[float | None, ...],

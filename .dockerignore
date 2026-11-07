@@ -1,0 +1,39 @@
+# What never belongs in the image, and what would make the build context
+# needlessly large. `docs/` matters most: the demand-analysis notebook alone is
+# over a megabyte, and the service reads none of it at runtime.
+
+.git
+.github
+.venv
+venv
+env
+
+__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+htmlcov
+.coverage
+.coverage.*
+
+docs
+tests
+AGENTS.md
+README.md
+
+# Credentials never enter a layer: the service token is injected at run time.
+.env
+.env.*
+!.env.example
+
+docker
+Dockerfile*
+.dockerignore
+
+.idea
+.vscode
+*.swp
+.DS_Store
+Thumbs.db
