@@ -16,6 +16,12 @@ on:
 permissions:
   contents: read
 
+# Declaring bash makes GitHub run every step with `bash -eo pipefail`; without it
+# a step runs with `bash -e`, and a failure on the left of a pipe goes unseen.
+defaults:
+  run:
+    shell: bash
+
 # A newer push to the same branch makes the older run pointless.
 concurrency:
   group: ci-${{ github.ref }}
