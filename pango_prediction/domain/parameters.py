@@ -5,7 +5,9 @@ universal rule. Some are calibrations of one company's behaviour:
 
 - the stockout threshold is about four replenishment cycles, so it follows the
   tenant's replenishment interval;
-- the made-to-order thresholds were fitted to one catalogue's distribution.
+- the made-to-order thresholds were fitted to one catalogue's distribution;
+- the history and activity windows are this catalogue's product life cycle;
+- the weekday weights describe which days this company trades, and how hard.
 
 Universal values stay as module constants where they are used: a week has seven
 days everywhere, the ADI and CV squared cutoffs come from Syntetos and Boylan,
@@ -24,6 +26,9 @@ plan for them.
 import hashlib
 import json
 from dataclasses import asdict, dataclass
+from math import isfinite
+
+from pango_prediction.domain.series import DAYS_PER_WEEK
 
 FINGERPRINT_LENGTH = 16
 
@@ -54,6 +59,53 @@ class DomainParameters:
     min_weeks_with_stock_data: int = 4
     """Selling weeks with a known opening balance needed to classify (S24)."""
 
+    inactivity_weeks: int = 26
+    """Weeks without a sale after which a series is read as inactive (S29).
+
+    About six months. The notebook keeps it despite knowing it strands products
+    that only sell in one quarter: only 70 of 3,092 inactive products qualified
+    for the seasonal rescue (7.5 C), 1.0 % of the last year's demand.
+    """
+
+    new_history_max_weeks: int = 13
+    """Longest history still called new (E5). A quarter for this tenant."""
+
+    limited_history_max_weeks: int = 52
+    """Longest history still called limited (E5). Above it, mature."""
+
+    min_observed_weeks: int = 8
+    """Observable weeks needed to forecast a series on its own (E1: 2 x H).
+
+    At eight weeks 99.8 % of units are evaluable. Tied to the horizon, so a
+    tenant forecasting further ahead needs a larger value.
+    """
+
+    weekday_weights: tuple[float, ...] = (1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 0.0)
+    """How much of a normal business day each weekday sells, Monday first.
+
+    Saturday is 0.6 because EquipMaster sells about 60 % of a weekday on it
+    (11.3), and Sunday is 0 because it does not trade. Both are calibration,
+    not rule: a tenant closed on Saturdays needs 0 and one that trades on
+    Sundays needs a different table altogether, which is why the whole table
+    is a parameter instead of a Saturday weight with the rest hardcoded.
+
+    A full week is the sum, 5.6 with these defaults. It is derived rather than
+    stored, so the two can never disagree.
+    """
+
+    classification_window_months: int | None = None
+    """Months of monthly history used to classify, or None for all of it.
+
+    None is not an oversight, it is what was evaluated. The notebook's agreed
+    parameter block (13.2) declares ``ventana_cuadrante_meses: 24``, but the
+    cell that actually computes the quadrant (7.4) truncates nothing: it runs
+    from each series' first month of sale to the last complete month, which for
+    this dataset is 44 months rather than 24. Every downstream decision was
+    made from classes computed over the whole history, so that is the default
+    here. Setting this to 24 is a one-line change once Route A says which of
+    the two it meant; see `docs/domain-rules.md` section 14.
+    """
+
     def __post_init__(self) -> None:
         if self.max_stockout_episode_weeks < 1:
             raise ValueError("max_stockout_episode_weeks must be at least 1")
@@ -65,6 +117,45 @@ class DomainParameters:
 
         if self.min_weeks_with_stock_data < 1:
             raise ValueError("min_weeks_with_stock_data must be at least 1")
+
+        if len(self.weekday_weights) != DAYS_PER_WEEK:
+            raise ValueError(
+                f"weekday_weights needs one weight per day, got "
+                f"{len(self.weekday_weights)}"
+            )
+
+        if any(not isfinite(weight) or weight < 0 for weight in self.weekday_weights):
+            raise ValueError("every weekday weight must be finite and non-negative")
+
+        if sum(self.weekday_weights) <= 0:
+            raise ValueError(
+                "at least one weekday must carry weight, or every week would "
+                "have no business days at all"
+            )
+
+        if self.inactivity_weeks < 1:
+            raise ValueError("inactivity_weeks must be at least 1")
+
+        if self.new_history_max_weeks < 1:
+            raise ValueError("new_history_max_weeks must be at least 1")
+
+        if self.limited_history_max_weeks <= self.new_history_max_weeks:
+            raise ValueError(
+                "limited_history_max_weeks must be greater than "
+                "new_history_max_weeks, or no history could ever be limited"
+            )
+
+        if self.min_observed_weeks < 1:
+            raise ValueError("min_observed_weeks must be at least 1")
+
+        if (
+            self.classification_window_months is not None
+            and self.classification_window_months < 1
+        ):
+            raise ValueError(
+                "classification_window_months must be at least 1, or None for "
+                "the whole history"
+            )
 
     def fingerprint(self) -> str:
         """Stable short hash of this calibration.

@@ -15,24 +15,15 @@ is seasonal, so the contraction is the correct treatment for all of them.
 """
 
 from collections.abc import Mapping, Sequence
-from datetime import date, timedelta
 
 from pango_prediction.domain.availability import observed_demand
 from pango_prediction.domain.intervals import empirical_interval
-from pango_prediction.domain.series import DAYS_PER_WEEK
+from pango_prediction.domain.series import future_weeks
 from pango_prediction.domain.types import ForecastPeriod
 from pango_prediction.ports.model import (
     InsufficientHistoryError,
     ModelRequest,
 )
-
-
-def _future_weeks(last_week: date, horizon: int) -> tuple[date, ...]:
-    """The Mondays of the ``horizon`` weeks after ``last_week``."""
-    return tuple(
-        last_week + timedelta(days=DAYS_PER_WEEK * step)
-        for step in range(1, horizon + 1)
-    )
 
 
 def _flat_forecast(
@@ -55,7 +46,7 @@ def _flat_forecast(
             lower=lower,
             upper=upper,
         )
-        for week in _future_weeks(request.series.dates[-1], request.horizon)
+        for week in future_weeks(request.series.dates[-1], request.horizon)
     )
 
 

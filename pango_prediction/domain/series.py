@@ -40,6 +40,21 @@ def last_complete_week_start(history_end: date) -> date:
     return candidate - timedelta(weeks=1)
 
 
+def future_weeks(last_week: date, horizon: int) -> tuple[date, ...]:
+    """The Mondays of the ``horizon`` weeks after ``last_week``.
+
+    One definition, shared by the forecast periods and by the calendar
+    covariate. If each derived its own, a week's business days could end up
+    attached to a different week from the estimate they explain.
+    """
+    if horizon < 1:
+        raise ValueError("the horizon must be at least one period")
+
+    return tuple(
+        last_week + timedelta(weeks=step) for step in range(1, horizon + 1)
+    )
+
+
 def build_weekly_series(
     series: ForecastSeriesInput,
     history_end: date,

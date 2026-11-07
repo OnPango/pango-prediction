@@ -99,16 +99,98 @@ class WeeklyAvailability:
     stock_handling: StockHandling
 
 
+class DemandClass(StrEnum):
+    """The Syntetos-Boylan quadrant of a series, computed on months (S27).
+
+    The grain is not incidental. At weekly grain 91.9 % of periods are zero and
+    1.2 % of units look like stable demand; aggregated monthly, 49.8 % do. The
+    notebook therefore classifies monthly and forecasts weekly.
+
+    SMOOTH, ERRATIC, INTERMITTENT, LUMPY
+        The four quadrants of average demand interval against the squared
+        coefficient of variation of the demand sizes.
+    INSUFFICIENT
+        There is a monthly series, but the statistics cannot be computed from
+        it: a series with a single month of sales has no spread to measure.
+        Not a rare edge case, 44 % of products.
+    NOT_CLASSIFIABLE
+        There is no monthly series to classify at all, because every month in
+        the window was spent in a stockout.
+
+    These values are a Route B proposal. `forecasts.demand_class` is a
+    per-tenant enum that has not been created yet.
+    """
+
+    SMOOTH = "SMOOTH"
+    ERRATIC = "ERRATIC"
+    INTERMITTENT = "INTERMITTENT"
+    LUMPY = "LUMPY"
+    INSUFFICIENT = "INSUFFICIENT"
+    NOT_CLASSIFIABLE = "NOT_CLASSIFIABLE"
+
+
+class HistoryClass(StrEnum):
+    """How much weekly history a series has (notebook E5).
+
+    Length alone does not decide whether a series can be forecast; the notebook
+    is explicit that what limits modelling is the scarcity of sales, not the
+    length of the history. It decides whether a series can be forecast *on its
+    own* or has to borrow from similar series.
+
+    The boundaries are tenant calibration, not platform rules: they describe
+    one catalogue's product life cycle.
+    """
+
+    NEW = "NEW"
+    LIMITED = "LIMITED"
+    MATURE = "MATURE"
+
+
+@dataclass(frozen=True, slots=True)
+class MonthlyDemand:
+    """One calendar month of the classification grid (notebook 7.4).
+
+    ``observable`` is false when half or more of the month's days fell in a
+    stockout, which makes the month's total a censored number rather than
+    demand. The statistics are computed over the observable months only.
+    """
+
+    month_start: date
+    demand: float
+    stockout_days: int
+    observable: bool
+
+
 @dataclass(frozen=True, slots=True)
 class DemandProfile:
+    """What a series' demand behaves like.
+
+    Deliberately not *which model should handle it*: that is the policy's
+    decision, and keeping the two apart is what lets Route A change its mind
+    about routing without Route B changing any code.
+
+    The monthly fields describe the classification grid; the weekly fields
+    describe the series that will actually be forecast. They disagree on
+    purpose, because the two grains answer different questions.
+    """
+
     series_id: str
-    observed_periods: int
-    nonzero_periods: int
+    demand_class: DemandClass
+    history_class: HistoryClass
+    stock_handling: StockHandling
     adi: float | None
+    """Average demand interval: observable months per month with a sale."""
     cv2: float | None
-    demand_class: str | None
+    """Squared coefficient of variation of the non-zero monthly demands."""
+    observable_months: int
+    nonzero_months: int
+    history_weeks: int
+    observed_weeks: int
+    """Weeks whose demand can be read as demand, so the maskable weeks removed."""
+    weeks_since_last_sale: int
     inactive: bool
-    short_history: bool
+    evaluable: bool
+    """Whether the series has enough observable weeks to be forecast alone (E1)."""
 
 
 @dataclass(frozen=True, slots=True)

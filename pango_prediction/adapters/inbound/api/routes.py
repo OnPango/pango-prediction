@@ -23,6 +23,7 @@ from pango_prediction.adapters.inbound.api.schemas import (
     ForecastRequest,
     ForecastResponse,
     HealthResponse,
+    ProfileResponse,
     SeriesErrorResponse,
     SeriesRequest,
     SeriesResultResponse,
@@ -39,8 +40,10 @@ from pango_prediction.config import (
     SERVICE_VERSION,
     Settings,
 )
+from pango_prediction.domain.calendar import ClosedDates
 from pango_prediction.domain.types import (
     DemandObservation,
+    DemandProfile,
     ForecastSeriesInput,
     StockObservation,
 )
@@ -69,11 +72,47 @@ def to_series_input(series: SeriesRequest) -> ForecastSeriesInput:
     )
 
 
+def to_closed_dates(request: ForecastRequest) -> ClosedDates:
+    """Map the calendar block onto the domain value object.
+
+    Warehouse keys become strings here for the same reason ``series_id`` does:
+    the schema numbers its warehouses, the domain treats the identifier as
+    opaque, and the conversion belongs at the edge.
+    """
+    return ClosedDates.of(
+        everywhere=request.calendar.closed_dates,
+        by_warehouse={
+            str(warehouse_id): dates
+            for warehouse_id, dates in request.calendar.closed_dates_by_warehouse.items()
+        },
+    )
+
+
 def to_command(request: ForecastRequest) -> ForecastCommand:
     return ForecastCommand(
         history_end=request.history_end,
         horizon=request.horizon,
         series=tuple(to_series_input(series) for series in request.series),
+        closed_dates=to_closed_dates(request),
+        # The tenant's calibration will arrive with the policy artifact. Until
+        # then the command's own default applies, which is EquipMaster's.
+    )
+
+
+def to_profile(profile: DemandProfile) -> ProfileResponse:
+    return ProfileResponse(
+        demand_class=profile.demand_class.value,
+        history_class=profile.history_class.value,
+        stock_handling=profile.stock_handling.value,
+        adi=profile.adi,
+        cv2=profile.cv2,
+        observable_months=profile.observable_months,
+        nonzero_months=profile.nonzero_months,
+        history_weeks=profile.history_weeks,
+        observed_weeks=profile.observed_weeks,
+        weeks_since_last_sale=profile.weeks_since_last_sale,
+        inactive=profile.inactive,
+        evaluable=profile.evaluable,
     )
 
 
@@ -88,6 +127,8 @@ def to_series_result(
         # envelope so Pango Core can integrate against the final shape.
         periods=[],
         warnings=list(outcome.warnings),
+        profile=(None if outcome.profile is None else to_profile(outcome.profile)),
+        horizon_business_days=list(outcome.horizon_business_days),
         error=(
             None
             if outcome.error is None

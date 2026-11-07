@@ -13,7 +13,14 @@ from dataclasses import dataclass
 
 SERVICE_NAME = "pango-prediction"
 SERVICE_VERSION = "0.1.0"
-CONTRACT_VERSION = "1.0"
+CONTRACT_VERSION = "1.1"
+"""The envelope this service serves.
+
+Bumped from 1.0 for the demand profile and the business-day covariate in
+the response. Both are additive, which section 3 of `docs/contract-v1.md`
+keeps inside 1.x, so a 1.0 request is still accepted and served this
+envelope; a client that ignores fields it does not know is unaffected.
+"""
 
 SERVICE_TOKEN_ENV = "PANGO_PREDICTION_SERVICE_TOKEN"
 MAX_SERIES_ENV = "PANGO_PREDICTION_MAX_SERIES_PER_REQUEST"
