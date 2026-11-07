@@ -424,6 +424,14 @@ python -m mypy pango_prediction tests
 
 In a cloud session, run the setup and the checks yourself before opening a PR. The owner may be on a phone.
 
+CI (`.github/workflows/ci.yml`) runs the same install and the same three checks on every PR into `dev` or `main` and on every push to them. It also builds `docker/Dockerfile.api` and smoke-tests the image:
+
+- it must exit without a service credential;
+- with one, it must answer `/health`;
+- `/v1/forecasts` must answer 401 without a token and 200 for a fixture request with one.
+
+Running the checks locally first still matters: CI confirms the result, it does not replace it.
+
 A normal implementation task should finish with the relevant checks passing.
 
 If a check fails:
@@ -482,7 +490,8 @@ feature/<slug>  one per feature, created from the latest origin/dev
 
 - Base `dev`, head `feature/<slug>`. Open it once the feature is complete, pushed and passing the quality gates.
 - The description follows `.github/pull_request_template.md`: what and why, a table of commits with their files, the checks with their results, open decisions and the next step.
-- After opening it, give the owner the PR link. The next feature starts on a new branch from `origin/dev`, following the dependency rule above.
+- After opening it, wait for CI on the PR and report its result together with the link. Fix a red CI before asking for a merge, and never get to green by skipping or disabling a check.
+- Then give the owner the PR link. The next feature starts on a new branch from `origin/dev`, following the dependency rule above.
 
 ### Worklog
 
