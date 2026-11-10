@@ -166,7 +166,8 @@ Content-Type: application/json
 
 ## 7. Top-level fields
 
-- `contract_version`: required, current value `1.0`.
+- `contract_version`: required; accepted values are `1.0` and `1.1`. New
+  integrations should send `1.1`.
 - `request_id`: required unique tracing identifier.
 - `forecast_run_id`: required Pango Core run identifier; opaque to Forecast Service.
 - `frequency`: required; current supported value `weekly`.
@@ -442,6 +443,36 @@ When DeepAR is selected:
 ```
 
 A checkpoint trained for one organization must not automatically be applied to another.
+
+## 15.1 Development policy artifact
+
+Until Route A publishes the evaluated production policy, Route B may load a
+development policy with this shape:
+
+```json
+{
+  "policy_version": "development-1",
+  "frequency": "WEEKLY",
+  "horizon": 4,
+  "params_version": "bd4371bcce546b17",
+  "rules": [
+    {
+      "when": { "demand_class": "SMOOTH" },
+      "model": "naive"
+    }
+  ],
+  "default": {
+    "model": "naive"
+  }
+}
+```
+
+Rules are evaluated in declaration order. A rule may match
+`demand_class`, `history_class`, `stock_handling`, `inactive` or `evaluable`.
+The policy loader rejects an unknown model, an incompatible frequency or
+horizon, and a `params_version` that does not match the domain calibration.
+This policy is for integration testing only; it is not Route A's final model
+selection decision.
 
 ## 16. Per-series failures
 
