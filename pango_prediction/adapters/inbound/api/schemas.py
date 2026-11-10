@@ -82,8 +82,8 @@ class PeriodResponse(_Schema):
     """One forecast period.
 
     All three numbers are required, because `forecast_periods.lower_bound` and
-    `upper_bound` are NOT NULL in the tenant schema. Nothing populates this yet:
-    it arrives with the model port.
+    `    upper_bound` are NOT NULL in the tenant schema. These values come from the
+    selected model's empirical residual interval.
     """
 
     period_start: date
@@ -127,6 +127,8 @@ class SeriesResultResponse(_Schema):
     series_id: int
     status: Literal["ok", "error"]
     periods: list[PeriodResponse] = Field(default_factory=list)
+    model_name: str | None = None
+    model_version: str | None = None
     warnings: list[str] = Field(default_factory=list)
     error: SeriesErrorResponse | None = None
     profile: ProfileResponse | None = None

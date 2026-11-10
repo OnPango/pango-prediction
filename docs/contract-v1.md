@@ -335,32 +335,58 @@ The feature is known into the future by construction, since it reads only the da
 
 ## 14. Forecast response
 
-Captured from the running service, not written by hand. Series 1198 is sold to order and could be profiled; series 1500 sent a negative quantity and could not.
+Captured from the running service, not written by hand. The development policy
+routes series 1198 to the `naive` baseline; series 1500 sent a negative
+quantity and could not be processed.
 
 ```json
 {
   "contract_version": "1.1",
   "service_version": "0.1.0",
-  "policy_version": null,
+  "policy_version": "development-1",
   "request_id": "req-2026-11-02-0001",
   "forecast_run_id": 41,
   "summary": {
     "total": 2,
-    "ok": 0,
-    "error": 2
+    "ok": 1,
+    "error": 1
   },
   "results": [
     {
       "series_id": 1198,
-      "status": "error",
-      "periods": [],
+      "status": "ok",
+      "model_name": "naive",
+      "model_version": "development",
+      "periods": [
+        {
+          "period_start": "2026-11-02",
+          "estimate": 3.0,
+          "lower": 0.0,
+          "upper": 6.0
+        },
+        {
+          "period_start": "2026-11-09",
+          "estimate": 3.0,
+          "lower": 0.0,
+          "upper": 6.0
+        },
+        {
+          "period_start": "2026-11-16",
+          "estimate": 3.0,
+          "lower": 0.0,
+          "upper": 6.0
+        },
+        {
+          "period_start": "2026-11-23",
+          "estimate": 3.0,
+          "lower": 0.0,
+          "upper": 6.0
+        }
+      ],
       "warnings": [
         "The series is sold to order, so zero stock was not read as a stockout."
       ],
-      "error": {
-        "code": "MODEL_NOT_AVAILABLE",
-        "message": "No forecasting model is deployed yet: the model policy and the model implementations are not part of this release."
-      },
+      "error": null,
       "profile": {
         "demand_class": "SMOOTH",
         "history_class": "LIMITED",
@@ -420,7 +446,11 @@ The monthly and the weekly counts disagree on purpose: classification happens mo
 
 ### Not yet populated
 
-`periods` is always empty and `policy_version` is always `null`, because no model policy is deployed. The envelope carries both so that Core can integrate against the final shape. A `model` block does not appear at all yet, for the same reason.
+With the development policy, successful series include four `periods`,
+`model_name`, `model_version` and `policy_version`. Route A can replace the
+development artifact without changing the HTTP envelope. Series that are not
+evaluable or have no applicable policy continue to return an empty `periods`
+array and a stable per-series error.
 
 ## 15. DeepAR metadata
 

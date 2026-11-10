@@ -8,13 +8,9 @@ The intended full flow (plan B13) is:
 
     input -> series -> availability -> calendar -> profile -> policy -> model
 
-What runs today is everything up to the policy: series regularization,
-availability, the demand profile and the calendar covariate. Policy and model
-selection are not built, so every series still ends as ``MODEL_NOT_AVAILABLE``.
-That is deliberate - the service says it cannot forecast rather than returning
-a number no model produced - but the series is no longer a black box while it
-waits: Pango Core learns what each series looks like, why it will be routed the
-way it will, and how many business days its horizon holds.
+The policy and model registry are injected so this use case can execute the
+same domain pipeline with a development policy today and Route A's evaluated
+policy later.
 
 One series failing never fails the batch (plan B17).
 """
@@ -29,14 +25,18 @@ from pango_prediction.domain.parameters import (
     DEFAULT_PARAMETERS,
     DomainParameters,
 )
+from pango_prediction.domain.policy import ModelPolicy, PolicyError
 from pango_prediction.domain.profile import build_demand_profile
 from pango_prediction.domain.series import build_weekly_series, future_weeks
 from pango_prediction.domain.types import (
     DemandClass,
     DemandProfile,
+    ForecastPeriod,
     ForecastSeriesInput,
     StockHandling,
 )
+from pango_prediction.ports.model import ModelError, ModelRequest
+from pango_prediction.ports.registry import ModelNotRegisteredError, ModelRegistry
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +82,9 @@ class SeriesOutcome:
     far, so a profile and an error can and do travel together."""
     horizon_business_days: tuple[float, ...] = ()
     """Equivalent business days of each week being forecast, warehouse-aware."""
+    periods: tuple[ForecastPeriod, ...] = ()
+    model_name: str | None = None
+    model_version: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -105,14 +108,22 @@ class ForecastResultBatch:
 class ForecastService:
     """Runs the forecast pipeline over a batch of series."""
 
+    def __init__(
+        self,
+        policy: ModelPolicy | None = None,
+        registry: ModelRegistry | None = None,
+    ) -> None:
+        self._policy = policy
+        self._registry = registry or ModelRegistry()
+
     def run(self, command: ForecastCommand) -> ForecastResultBatch:
         return ForecastResultBatch(
             outcomes=tuple(
                 self._run_one(series, command) for series in command.series
             ),
-            # No policy is loaded yet, so there is no version to report. Null is
-            # the honest answer; a placeholder string would read as a real one.
-            policy_version=None,
+            policy_version=(
+                None if self._policy is None else self._policy.policy_version
+            ),
         )
 
     def _run_one(
@@ -165,22 +176,91 @@ class ForecastService:
             command.parameters,
         )
 
+        horizon_business_days = weekly_business_days(
+            future_weeks(regularized.dates[-1], command.horizon),
+            command.closed_dates.for_warehouse(series.warehouse_id),
+            command.parameters,
+        )
+
+        if self._policy is None:
+            return SeriesOutcome(
+                series_id=series.series_id,
+                warnings=self._warnings(profile),
+                profile=profile,
+                horizon_business_days=horizon_business_days,
+                error=SeriesError(
+                    code=SeriesErrorCode.MODEL_NOT_AVAILABLE,
+                    message="No model policy is loaded.",
+                ),
+            )
+
+        try:
+            decision = self._policy.resolve(profile)
+        except PolicyError as error:
+            return SeriesOutcome(
+                series_id=series.series_id,
+                warnings=self._warnings(profile),
+                profile=profile,
+                horizon_business_days=horizon_business_days,
+                error=SeriesError(
+                    code=SeriesErrorCode.MODEL_NOT_AVAILABLE,
+                    message=str(error),
+                ),
+            )
+
+        if decision.model is None:
+            return SeriesOutcome(
+                series_id=series.series_id,
+                warnings=self._warnings(profile),
+                profile=profile,
+                horizon_business_days=horizon_business_days,
+                error=SeriesError(
+                    code=SeriesErrorCode.MODEL_NOT_AVAILABLE,
+                    message=decision.reason or "The policy selected no model.",
+                ),
+            )
+
+        try:
+            model = self._registry.resolve(decision.model.name)
+            periods = model.predict(
+                ModelRequest(
+                    series=regularized,
+                    availability=availability,
+                    horizon=command.horizon,
+                    params=decision.model.params,
+                )
+            )
+        except ModelNotRegisteredError as error:
+            return SeriesOutcome(
+                series_id=series.series_id,
+                warnings=self._warnings(profile),
+                profile=profile,
+                horizon_business_days=horizon_business_days,
+                error=SeriesError(
+                    code=SeriesErrorCode.MODEL_NOT_AVAILABLE,
+                    message=str(error),
+                ),
+            )
+        except ModelError as error:
+            return SeriesOutcome(
+                series_id=series.series_id,
+                warnings=self._warnings(profile),
+                profile=profile,
+                horizon_business_days=horizon_business_days,
+                error=SeriesError(
+                    code=SeriesErrorCode.MODEL_FAILED,
+                    message=str(error),
+                ),
+            )
+
         return SeriesOutcome(
             series_id=series.series_id,
             warnings=self._warnings(profile),
             profile=profile,
-            horizon_business_days=weekly_business_days(
-                future_weeks(regularized.dates[-1], command.horizon),
-                command.closed_dates.for_warehouse(series.warehouse_id),
-                command.parameters,
-            ),
-            error=SeriesError(
-                code=SeriesErrorCode.MODEL_NOT_AVAILABLE,
-                message=(
-                    "No forecasting model is deployed yet: the model policy and "
-                    "the model implementations are not part of this release."
-                ),
-            ),
+            horizon_business_days=horizon_business_days,
+            periods=periods,
+            model_name=model.name,
+            model_version="development",
         )
 
     @staticmethod

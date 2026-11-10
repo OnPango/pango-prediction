@@ -13,10 +13,12 @@ unrelated import when the service credential is absent. Run it as a factory:
 """
 
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI
 
 from pango_prediction.adapters.inbound.api.routes import build_router
+from pango_prediction.adapters.outbound.registry import default_registry
 from pango_prediction.application.forecast_service import ForecastService
 from pango_prediction.config import (
     SERVICE_NAME,
@@ -24,6 +26,8 @@ from pango_prediction.config import (
     Settings,
     load_settings,
 )
+from pango_prediction.domain.parameters import DEFAULT_PARAMETERS
+from pango_prediction.domain.policy import load_policy
 
 PACKAGE_LOGGER = "pango_prediction"
 
@@ -70,6 +74,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_tags=[{"name": SERVICE_NAME}],
     )
 
-    app.include_router(build_router(resolved, ForecastService()))
+    registry = default_registry()
+    policy_path = Path(__file__).parents[1] / "config" / "development_policy.json"
+    policy = load_policy(
+        policy_path,
+        registry_names=frozenset(registry.names),
+        parameters=DEFAULT_PARAMETERS,
+    )
+
+    app.include_router(build_router(resolved, ForecastService(policy, registry)))
 
     return app
