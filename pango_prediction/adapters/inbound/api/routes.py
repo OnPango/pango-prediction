@@ -31,6 +31,7 @@ from pango_prediction.adapters.inbound.api.schemas import (
     SeriesRequest,
     SeriesResultResponse,
     SummaryResponse,
+    TotalResponse,
 )
 from pango_prediction.application.forecast_service import (
     ForecastCommand,
@@ -145,6 +146,15 @@ def to_series_result(
             )
             for period in outcome.periods
         ],
+        total=(
+            None
+            if outcome.total is None
+            else TotalResponse(
+                estimate=outcome.total.estimate,
+                lower=outcome.total.lower,
+                upper=outcome.total.upper,
+            )
+        ),
         model_name=outcome.model_name,
         model_version=outcome.model_version,
         warnings=list(outcome.warnings),

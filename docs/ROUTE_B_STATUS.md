@@ -10,7 +10,7 @@ PANGO Prediction, the production forecasting service. Prepared for the Route A o
 
 **The forecasting domain is complete and the service produces deterministic baseline forecasts. The HTTP bridge is ready for Pango Core integration; production model selection and offline training remain Route A work.**
 
-The service receives normalized daily demand and stock from Pango Core, constructs weekly series, resolves the development policy, executes a registered baseline and returns four forecast periods per successful series. Per-series failures are returned without discarding successful series in the same request.
+The service receives normalized daily demand and stock from Pango Core, constructs weekly series, resolves the development policy, executes a registered baseline and returns four forecast periods plus a calibrated horizon total per successful series. Per-series failures are returned without discarding successful series in the same request.
 
 What remains is the Core-side client and persistence flow, followed by replacement of the development policy with the versioned policy produced by Route A.
 

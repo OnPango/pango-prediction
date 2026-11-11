@@ -92,6 +92,12 @@ class PeriodResponse(_Schema):
     upper: float
 
 
+class TotalResponse(_Schema):
+    estimate: float
+    lower: float
+    upper: float
+
+
 class SeriesErrorResponse(_Schema):
     code: str
     message: str
@@ -127,6 +133,7 @@ class SeriesResultResponse(_Schema):
     series_id: int
     status: Literal["ok", "error"]
     periods: list[PeriodResponse] = Field(default_factory=list)
+    total: TotalResponse | None = None
     model_name: str | None = None
     model_version: str | None = None
     warnings: list[str] = Field(default_factory=list)

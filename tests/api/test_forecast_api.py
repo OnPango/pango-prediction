@@ -157,11 +157,16 @@ def test_valid_series_are_forecast_when_the_development_policy_matches(
     for series_id in (1042, 1198):
         assert by_id[series_id]["status"] == "ok"
         assert len(by_id[series_id]["periods"]) == 4
+        assert by_id[series_id]["total"] is not None
+        assert by_id[series_id]["total"]["estimate"] == pytest.approx(
+            sum(period["estimate"] for period in by_id[series_id]["periods"])
+        )
         assert by_id[series_id]["model_name"] == "naive"
 
     for series_id in (1255, 1403):
         assert by_id[series_id]["error"]["code"] == "MODEL_NOT_AVAILABLE"
         assert by_id[series_id]["periods"] == []
+        assert by_id[series_id]["total"] is None
 
 
 def test_availability_findings_travel_as_warnings(client: TestClient) -> None:

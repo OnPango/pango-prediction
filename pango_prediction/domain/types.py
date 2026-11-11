@@ -219,6 +219,24 @@ class ForecastPeriod:
 
 
 @dataclass(frozen=True, slots=True)
+class ForecastTotal:
+    """The calibrated aggregate forecast across the requested horizon."""
+
+    estimate: float
+    lower: float
+    upper: float
+
+    def __post_init__(self) -> None:
+        if self.lower < 0:
+            raise ValueError("a demand bound cannot be negative")
+        if not self.lower <= self.estimate <= self.upper:
+            raise ValueError(
+                "the total estimate must lie inside its interval "
+                f"({self.lower}, {self.estimate}, {self.upper})"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class ModelSpec:
     name: str
     params: Mapping[str, object] = field(default_factory=dict)

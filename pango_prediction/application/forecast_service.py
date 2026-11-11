@@ -17,6 +17,7 @@ One series failing never fails the batch (plan B17).
 
 from dataclasses import dataclass, field
 from datetime import date
+from typing import cast
 
 from pango_prediction.application.errors import SeriesErrorCode
 from pango_prediction.domain.availability import build_weekly_availability
@@ -33,9 +34,14 @@ from pango_prediction.domain.types import (
     DemandProfile,
     ForecastPeriod,
     ForecastSeriesInput,
+    ForecastTotal,
     StockHandling,
 )
-from pango_prediction.ports.model import ModelError, ModelRequest
+from pango_prediction.ports.model import (
+    ForecastTotalModel,
+    ModelError,
+    ModelRequest,
+)
 from pango_prediction.ports.registry import ModelNotRegisteredError, ModelRegistry
 
 
@@ -83,6 +89,7 @@ class SeriesOutcome:
     horizon_business_days: tuple[float, ...] = ()
     """Equivalent business days of each week being forecast, warehouse-aware."""
     periods: tuple[ForecastPeriod, ...] = ()
+    total: ForecastTotal | None = None
     model_name: str | None = None
     model_version: str | None = None
 
@@ -222,14 +229,19 @@ class ForecastService:
 
         try:
             model = self._registry.resolve(decision.model.name)
-            periods = model.predict(
-                ModelRequest(
-                    series=regularized,
-                    availability=availability,
-                    horizon=command.horizon,
-                    params=decision.model.params,
-                )
+            model_request = ModelRequest(
+                series=regularized,
+                availability=availability,
+                horizon=command.horizon,
+                params=decision.model.params,
             )
+            periods = model.predict(model_request)
+            if not hasattr(model, "predict_total"):
+                raise ModelError(
+                    f"Model '{model.name}' does not provide a calibrated horizon total."
+                )
+            total_model = cast(ForecastTotalModel, model)
+            total = total_model.predict_total(model_request, periods)
         except ModelNotRegisteredError as error:
             return SeriesOutcome(
                 series_id=series.series_id,
@@ -259,6 +271,7 @@ class ForecastService:
             profile=profile,
             horizon_business_days=horizon_business_days,
             periods=periods,
+            total=total,
             model_name=model.name,
             model_version="development",
         )

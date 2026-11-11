@@ -383,6 +383,11 @@ quantity and could not be processed.
           "upper": 6.0
         }
       ],
+      "total": {
+        "estimate": 12.0,
+        "lower": 0.0,
+        "upper": 24.0
+      },
       "warnings": [
         "The series is sold to order, so zero stock was not read as a stockout."
       ],
@@ -425,6 +430,12 @@ quantity and could not be processed.
 ```
 
 `profile` is returned whenever the series got far enough to be profiled, **including when it cannot be forecast**: for an inactive or unclassifiable series it is the whole of what the service has to say. It is `null` only when the series failed before that, as 1500 did.
+
+`periods` contains one entry per future Monday-starting week. `total` is the
+calibrated aggregate across the requested horizon. Its interval is not formed
+by summing the weekly lower and upper bounds; each model must provide the
+horizon-total interval explicitly. `total` is `null` for a series that did not
+produce a forecast.
 
 ### The profile block
 
