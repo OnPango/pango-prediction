@@ -29,9 +29,12 @@ horizon = 4 weeks
 
 ## Project Status
 
-🚧 **Under active development**
+🚧 **Under active development — HTTP integration ready for Pango Core**
 
-The project is currently implementing the forecasting domain and production infrastructure.
+The forecasting domain, development policy wiring, baseline execution and HTTP
+response contract are implemented. The remaining integration work is on the
+Pango Core side: submit normalized daily inputs, persist the response and
+calculate inventory alerts and reorder points.
 
 Development is intentionally incremental:
 
@@ -46,9 +49,9 @@ Application Service
   ↓
 HTTP API
   ↓
-DeepAR Runtime
-  ↓
 Pango Core Integration
+  ↓
+DeepAR Runtime
 ```
 
 The first objective is not to deploy a complex ML model.
@@ -151,6 +154,9 @@ Pango Core is responsible for:
 - persisting forecast results.
 
 The Forecast Service is responsible only for forecasting.
+
+It does not calculate inventory alerts or reorder points. It returns weekly
+forecast estimates and intervals so Pango Core can apply those business rules.
 
 ---
 

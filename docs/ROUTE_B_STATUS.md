@@ -2,17 +2,17 @@
 
 PANGO Prediction, the production forecasting service. Prepared for the Route A owner and for whoever tracks this project.
 
-**Last updated:** 6 November 2026 · **Contract served:** v1.1 · **Domain parameters fingerprint:** `bd4371bcce546b17`
+**Last updated:** 9 November 2026 · **Contract served:** v1.1 · **Domain parameters fingerprint:** `bd4371bcce546b17`
 
 ---
 
 ## 1. Where it stands
 
-**The forecasting domain is complete and the service is deployable. It does not forecast yet, and the reason is a single open decision that belongs to Route A: the format of `model_policy.json`.**
+**The forecasting domain is complete and the service produces deterministic baseline forecasts. The HTTP bridge is ready for Pango Core integration; production model selection and offline training remain Route A work.**
 
-Everything up to model selection runs, is tested, and is served over HTTP from a container: series construction, availability and censoring, the demand profile and classification, the calendar covariate, the model port, three baseline models and the model registry.
+The service receives normalized daily demand and stock from Pango Core, constructs weekly series, resolves the development policy, executes a registered baseline and returns four forecast periods per successful series. Per-series failures are returned without discarding successful series in the same request.
 
-What is missing between here and a forecast is the policy that says *which model handles which series*. Route B deliberately has not invented it.
+What remains is the Core-side client and persistence flow, followed by replacement of the development policy with the versioned policy produced by Route A.
 
 ---
 
@@ -45,7 +45,7 @@ Source: 1,409 lines of domain, 266 of application, 177 of ports, 624 of adapters
 | API | 31 |
 | Integration against the request fixtures | 14 |
 | Registry, config, assembly, architecture, packaging | 42 |
-| **Total** | **269** |
+| **Total** | **276** |
 
 `ruff check .` clean · `mypy --strict` clean across 44 files · architecture tests assert that no inner layer imports a web framework and that the domain imports nothing outward.
 
@@ -53,51 +53,76 @@ Source: 1,409 lines of domain, 266 of application, 177 of ports, 624 of adapters
 
 ## 3. What the service answers today
 
-A real response, for a series that cannot be forecast:
+A successful response contains weekly periods and model metadata:
 
 ```json
 {
   "series_id": 1198,
-  "status": "error",
-  "warnings": ["The series is sold to order, so zero stock was not read as a stockout."],
-  "error": { "code": "MODEL_NOT_AVAILABLE", "message": "No forecasting model is deployed yet..." },
-  "profile": {
-    "demand_class": "SMOOTH",  "history_class": "LIMITED",
-    "stock_handling": "MADE_TO_ORDER",
-    "adi": 1.0, "cv2": 0.14,
-    "observable_months": 5, "nonzero_months": 5,
-    "history_weeks": 22, "observed_weeks": 22,
-    "weeks_since_last_sale": 0, "inactive": false, "evaluable": true
-  },
-  "horizon_business_days": [4.6, 5.6, 4.6, 5.6]
+  "status": "ok",
+  "model_name": "naive",
+  "model_version": "development",
+  "policy_version": "development-1",
+  "periods": [
+    {
+      "period_start": "2026-11-02",
+      "estimate": 3.0,
+      "lower": 0.0,
+      "upper": 6.0
+    }
+  ]
 }
 ```
 
-The profile travels **alongside** the error, not instead of it. For an inactive or unclassifiable series it is the whole of what the service has to say, and it tells Pango Core what will happen to a series before any model exists.
+An invalid or non-evaluable series is reported independently:
+
+```json
+{
+  "series_id": 1500,
+  "status": "error",
+  "periods": [],
+  "error": {
+    "code": "INVALID_SERIES",
+    "message": "Demand quantity cannot be negative"
+  }
+}
+```
+
+The complete response envelope and field definitions are maintained in
+[`contract-v1.md`](contract-v1.md). Pango Core should persist successful
+periods and per-series errors separately, then calculate inventory alerts and
+reorder points from the persisted forecast.
 
 Per-request log, contract §20:
 
 ```text
-INFO: request_id=req-... forecast_run_id=41 series_count=5 policy_version=None
-      model_name=None model_version=None duration_ms=5.8 status=error
+INFO: request_id=req-... forecast_run_id=41 series_count=5 policy_version=development-1
+      model_name=naive model_version=development duration_ms=5.8 status=partial
 ```
 
 No part of the payload is logged.
 
 ---
 
-## 4. The one thing blocking a forecast
+## 4. What remains for end-to-end integration
 
-**The policy format.** `README.md` sketches `demand_class → model`. Section 9 of `domain-rules.md` shows that is not expressive enough: the notebook's `destino` depends on five dimensions — activity, history class, monthly quadrant, stock handling and seasonality — and three quarters of the catalogue needs a **"no forecast"** outcome that the sketched format cannot express.
+Pango Core still needs to implement the consumer side of the contract:
 
-| Destination | Products | Share of last year's demand |
-|---|---|---|
-| Individual forecast | 1,329 | 91.9 % |
-| Short history (learns from similar series) | 397 | 3.3 % |
-| Made to order / aggregated | 13 | 0.3 % |
-| **No forecast (inactive)** | 3,022 | 4.6 % |
+- build the request from movements already marked as demand-generating and daily stock observations;
+- call `POST /v1/forecasts` with authentication and a unique `request_id`;
+- persist `ForecastRun`, successful `Forecast` rows and their `ForecastPeriod` rows;
+- persist per-series errors and represent partial runs;
+- make retries idempotent using `request_id`;
+- use the forecast output to calculate alerts and reorder points.
 
-Route B loads and executes the policy; it does not decide it. Once the format is agreed, the loader plus wiring is a small step: the registry, the profile and the intervals it needs are all built.
+The following are intentionally outside the current integration bridge:
+
+- administrator-managed closure dates;
+- DeepAR training and checkpoint serving;
+- the final Route A model-selection policy;
+- direct database access from this service.
+
+The current policy is explicitly a development artifact and must not be
+interpreted as the final statistical model decision.
 
 ---
 
