@@ -96,3 +96,103 @@ def empirical_interval(
     above = max(quantile(residuals, quantiles.upper), 0.0)
 
     return max(estimate + below, 0.0), max(estimate + above, 0.0)
+
+
+MIN_HORIZON_RESIDUALS = 8
+"""Horizon-sum residuals needed before the total interval is read from them.
+
+Below this, the quantiles 0.10 and 0.90 of the sums would rest on one or two
+order statistics. A platform rule rather than a tenant calibration, so it is not
+a field of `DomainParameters` and does not enter the parameter fingerprint.
+"""
+
+
+def one_step_residuals(
+    values: Sequence[float],
+    origin_forecasts: Sequence[float | None],
+) -> tuple[float, ...]:
+    """Weekly residuals ``y[t] - f[t]`` at every origin that has a forecast.
+
+    ``origin_forecasts[t]`` is the flat weekly forecast the model would have made
+    with ``values[:t]`` only, or ``None`` where it could not make one yet.
+    """
+    _check_alignment(values, origin_forecasts)
+
+    return tuple(
+        value - forecast
+        for value, forecast in zip(values, origin_forecasts, strict=True)
+        if forecast is not None
+    )
+
+
+def horizon_residuals(
+    values: Sequence[float],
+    origin_forecasts: Sequence[float | None],
+    horizon: int,
+) -> tuple[float, ...]:
+    """Residuals of the ``horizon``-week total, one per rolling origin.
+
+    At origin ``t`` the model forecasts ``f[t]`` for each of the next
+    ``horizon`` weeks, so its total is ``horizon * f[t]``; the realised total is
+    ``sum(values[t : t + horizon])``. Origins overlap by design: they are every
+    week the forecast could have been issued, as in production.
+
+    This is the decision D4 of Route A: the interval of a total comes from real
+    totals. Scaling a weekly residual by the horizon assumes the four weekly
+    errors are identical, which over-widens it for intermittent demand and gets
+    its asymmetry wrong.
+    """
+    _check_alignment(values, origin_forecasts)
+
+    if horizon < 1:
+        raise ValueError("the horizon must be at least one period")
+
+    return tuple(
+        sum(values[start : start + horizon]) - horizon * forecast
+        for start, forecast in enumerate(origin_forecasts)
+        if forecast is not None and start + horizon <= len(values)
+    )
+
+
+def horizon_total_interval(
+    estimate: float,
+    values: Sequence[float],
+    origin_forecasts: Sequence[float | None],
+    horizon: int,
+    quantiles: IntervalQuantiles,
+) -> tuple[float, float, float]:
+    """The total over ``horizon`` weeks of a flat forecast, with its interval.
+
+    Returns ``(total, lower, upper)``. The point total is ``horizon *
+    estimate``, which is exact for a flat forecast: the mean of a sum is the sum
+    of the means. Only the interval needs the horizon sums.
+
+    With fewer than `MIN_HORIZON_RESIDUALS` horizon sums, the interval falls
+    back to the weekly residuals scaled by the horizon, the previous calculation.
+    It is declared as a deviation from D4 for short series, and it is not always
+    wider: when a model over-forecasts in sample, every residual is negative and
+    the upper bound collapses onto the estimate. Coverage must be reported
+    separately for totals read from sums and for totals from this fallback.
+    """
+    total = horizon * estimate
+    sums = horizon_residuals(values, origin_forecasts, horizon)
+
+    if len(sums) >= MIN_HORIZON_RESIDUALS:
+        lower, upper = empirical_interval(total, sums, quantiles)
+        return total, lower, upper
+
+    weekly = one_step_residuals(values, origin_forecasts)
+    lower, upper = empirical_interval(
+        total,
+        [residual * horizon for residual in weekly],
+        quantiles,
+    )
+    return total, lower, upper
+
+
+def _check_alignment(
+    values: Sequence[float],
+    origin_forecasts: Sequence[float | None],
+) -> None:
+    if len(values) != len(origin_forecasts):
+        raise ValueError("there must be one origin forecast per observed week")
