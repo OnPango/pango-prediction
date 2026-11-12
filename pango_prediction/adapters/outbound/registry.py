@@ -11,15 +11,15 @@ from pango_prediction.adapters.outbound.baselines import (
     ZeroModel,
 )
 from pango_prediction.adapters.outbound.croston import SbaModel
+from pango_prediction.adapters.outbound.statsforecast import statsforecast_models
 from pango_prediction.ports.registry import ModelRegistry
 
 
 def default_registry() -> ModelRegistry:
     """The models available in the CPU-only service.
 
-    The baselines and SBA so far. Further candidates (tsb, adida, ets, theta,
-    ...) and the seasonal block model get registered here as they are
-    implemented; a neural runtime only in a build that carries a checkpoint.
+    The baselines, SBA and the local StatsForecast candidates. DeepAR remains
+    separate because it requires a versioned checkpoint and a neural runtime.
 
     A function rather than a module-level constant, so each caller gets its own
     instance and a test can build a different registry without having to undo a
@@ -30,4 +30,5 @@ def default_registry() -> ModelRegistry:
         NaiveModel(),
         MovingAverageModel(),
         SbaModel(),
+        *statsforecast_models(),
     )

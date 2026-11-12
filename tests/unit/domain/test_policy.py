@@ -97,7 +97,7 @@ def test_rejects_incompatible_policy(
 
 def test_rejects_unregistered_model() -> None:
     data = policy_data()
-    data["rules"] = [{"model": "croston"}]
+    data["rules"] = [{"model": "not_a_model"}]
 
     with pytest.raises(PolicyError, match="not registered"):
         load_policy(data, registry_names=names(), parameters=DEFAULT_PARAMETERS)
