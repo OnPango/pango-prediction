@@ -562,7 +562,39 @@ Pango Core owns persistence-level idempotency.
 
 Forecast Service never writes business forecast results directly to PostgreSQL.
 
-## 19. Batching
+## 19. Forecast evaluation
+
+After the forecast horizon has elapsed, Pango Core sends the stored forecast
+and the realised demand to:
+
+```http
+POST /v1/forecast-evaluations
+```
+
+The endpoint uses the same service credential as `/v1/forecasts`. Each period
+contains `estimate`, `lower`, `upper`, `actual` and an explicit `observable`
+flag. Non-observable periods are excluded from all metrics. `training_values`
+contains the historical observable demand used for MASE; the service uses a
+four-week seasonal-naive scale.
+
+The response contains metrics per series and an `aggregate` across all
+observable periods. The official metrics are:
+
+```text
+error = actual - estimate
+WAPE = sum(abs(error)) / sum(actual)
+Bias = sum(error) / sum(actual)
+MAE = mean(abs(error))
+MASE = MAE / seasonal-naive scale
+interval_coverage = periods inside [lower, upper] / evaluated periods
+```
+
+When the observable actual total is zero, WAPE and Bias are `null`. When MASE
+does not have enough history or has a zero scale, it is `null`. Pango Core
+persists the request facts and the returned metrics; Prediction calculates the
+official values.
+
+## 20. Batching
 
 The service should enforce a configurable:
 
@@ -572,7 +604,7 @@ MAX_SERIES_PER_REQUEST
 
 If needed, Pango Core may split large jobs into multiple calls while keeping the same contract.
 
-## 20. Logging
+## 21. Logging
 
 Log at least:
 
@@ -589,7 +621,7 @@ status
 
 Do not log full historical payloads by default.
 
-## 21. Compatibility rule
+## 22. Compatibility rule
 
 Changes to weekly semantics, availability rules, profiling, request fields or output semantics must be reflected in:
 
