@@ -21,6 +21,10 @@ dev = [
     "pytest-cov>=7.1",
     "ruff>=0.17",
 ]
+deepar = [
+    "neuralforecast>=3.0,<4.0",
+    "pandas>=2.2",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

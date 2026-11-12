@@ -12,10 +12,11 @@ from pango_prediction.adapters.outbound.baselines import (
 )
 from pango_prediction.adapters.outbound.croston import SbaModel
 from pango_prediction.adapters.outbound.statsforecast import statsforecast_models
+from pango_prediction.ports.model import ForecastModel
 from pango_prediction.ports.registry import ModelRegistry
 
 
-def default_registry() -> ModelRegistry:
+def default_registry(*, deepar: ForecastModel | None = None) -> ModelRegistry:
     """The models available in the CPU-only service.
 
     The baselines, SBA and the local StatsForecast candidates. DeepAR remains
@@ -25,10 +26,13 @@ def default_registry() -> ModelRegistry:
     instance and a test can build a different registry without having to undo a
     global one.
     """
-    return ModelRegistry(
+    models: list[ForecastModel] = [
         ZeroModel(),
         NaiveModel(),
         MovingAverageModel(),
         SbaModel(),
         *statsforecast_models(),
-    )
+    ]
+    if deepar is not None:
+        models.append(deepar)
+    return ModelRegistry(*models)
