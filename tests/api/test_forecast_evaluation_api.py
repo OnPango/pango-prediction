@@ -24,6 +24,7 @@ def evaluation_payload() -> dict[str, Any]:
         "request_id": "evaluation-1",
         "forecast_run_id": 41,
         "frequency": "WEEKLY",
+        "horizon": 2,
         "series": [
             {
                 "series_id": 1198,
@@ -34,6 +35,7 @@ def evaluation_payload() -> dict[str, Any]:
                         "lower": 2,
                         "upper": 5,
                         "actual": 5,
+                        "observable": True,
                     },
                     {
                         "period_start": "2026-11-09",

@@ -325,6 +325,12 @@ def build_router(settings: Settings, service: ForecastService) -> APIRouter:
                 len(request.series),
                 settings.max_series_per_request,
             )
+        series_ids = [series.series_id for series in request.series]
+        if len(set(series_ids)) != len(series_ids):
+            raise HTTPException(
+                status_code=422,
+                detail="series_id must be unique within an evaluation request",
+            )
 
         results: list[SeriesEvaluationResponse] = []
         all_periods: list[EvaluationPeriod] = []
@@ -334,6 +340,14 @@ def build_router(settings: Settings, service: ForecastService) -> APIRouter:
         has_totals = True
 
         for series in request.series:
+            if len(series.periods) != request.horizon:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"series {series.series_id} must contain exactly "
+                        f"{request.horizon} periods"
+                    ),
+                )
             periods = tuple(
                 EvaluationPeriod(
                     period_start=period.period_start,

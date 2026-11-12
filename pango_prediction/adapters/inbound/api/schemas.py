@@ -104,7 +104,7 @@ class EvaluationPeriodRequest(_Schema):
     lower: float
     upper: float
     actual: float
-    observable: bool = True
+    observable: bool
 
 
 class EvaluationTotalRequest(_Schema):
@@ -125,6 +125,7 @@ class ForecastEvaluationRequest(_Schema):
     request_id: str = Field(min_length=1)
     forecast_run_id: int
     frequency: Literal["WEEKLY"]
+    horizon: Annotated[int, Field(ge=1)]
     series: Annotated[list[EvaluationSeriesRequest], Field(min_length=1)]
 
 
