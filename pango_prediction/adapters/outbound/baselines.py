@@ -19,7 +19,7 @@ from collections.abc import Mapping, Sequence
 from pango_prediction.domain.availability import observed_demand
 from pango_prediction.domain.intervals import empirical_interval
 from pango_prediction.domain.series import future_weeks
-from pango_prediction.domain.types import ForecastPeriod
+from pango_prediction.domain.types import ForecastPeriod, ForecastTotal
 from pango_prediction.ports.model import (
     InsufficientHistoryError,
     ModelRequest,
@@ -48,6 +48,21 @@ def _flat_forecast(
         )
         for week in future_weeks(request.series.dates[-1], request.horizon)
     )
+
+
+def _total_forecast(
+    request: ModelRequest,
+    estimate: float,
+    residuals: Sequence[float],
+) -> ForecastTotal:
+    horizon_estimate = estimate * request.horizon
+    horizon_residuals = [residual * request.horizon for residual in residuals]
+    lower, upper = empirical_interval(
+        horizon_estimate,
+        horizon_residuals,
+        request.quantiles,
+    )
+    return ForecastTotal(estimate=horizon_estimate, lower=lower, upper=upper)
 
 
 def _history(request: ModelRequest, minimum: int, model: str) -> tuple[float, ...]:
@@ -93,6 +108,15 @@ class ZeroModel:
         # Forecasting zero makes every observation its own residual.
         return _flat_forecast(request, estimate=0.0, residuals=values)
 
+    def predict_total(
+        self,
+        request: ModelRequest,
+        periods: tuple[ForecastPeriod, ...],
+    ) -> ForecastTotal:
+        del periods
+        values = _history(request, minimum=1, model=self.name)
+        return _total_forecast(request, estimate=0.0, residuals=values)
+
 
 class NaiveModel:
     """Forecasts the last observable week, repeated."""
@@ -107,6 +131,18 @@ class NaiveModel:
         ]
 
         return _flat_forecast(request, estimate=values[-1], residuals=residuals)
+
+    def predict_total(
+        self,
+        request: ModelRequest,
+        periods: tuple[ForecastPeriod, ...],
+    ) -> ForecastTotal:
+        del periods
+        values = _history(request, minimum=2, model=self.name)
+        residuals = [
+            later - earlier for earlier, later in zip(values, values[1:], strict=False)
+        ]
+        return _total_forecast(request, estimate=values[-1], residuals=residuals)
 
 
 class MovingAverageModel:
@@ -131,6 +167,24 @@ class MovingAverageModel:
         ]
 
         return _flat_forecast(
+            request,
+            estimate=_mean(values[-window:]),
+            residuals=residuals,
+        )
+
+    def predict_total(
+        self,
+        request: ModelRequest,
+        periods: tuple[ForecastPeriod, ...],
+    ) -> ForecastTotal:
+        del periods
+        window = _positive_int_param(request.params, "window", self.name)
+        values = _history(request, minimum=window + 1, model=self.name)
+        residuals = [
+            values[index] - _mean(values[index - window : index])
+            for index in range(window, len(values))
+        ]
+        return _total_forecast(
             request,
             estimate=_mean(values[-window:]),
             residuals=residuals,

@@ -27,6 +27,7 @@ from pango_prediction.domain.intervals import (
 )
 from pango_prediction.domain.types import (
     ForecastPeriod,
+    ForecastTotal,
     RegularizedSeries,
     WeeklyAvailability,
 )
@@ -80,4 +81,16 @@ class ForecastModel(Protocol):
         Returns one period per horizon step, each with its interval. Raises
         ``ModelError`` when this series cannot be forecast by this model.
         """
+        ...
+
+
+class ForecastTotalModel(Protocol):
+    """Optional capability for models calibrated on horizon totals."""
+
+    def predict_total(
+        self,
+        request: ModelRequest,
+        periods: tuple[ForecastPeriod, ...],
+    ) -> ForecastTotal:
+        """Return the interval for the aggregate horizon demand."""
         ...

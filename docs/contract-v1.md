@@ -166,7 +166,8 @@ Content-Type: application/json
 
 ## 7. Top-level fields
 
-- `contract_version`: required, current value `1.0`.
+- `contract_version`: required; accepted values are `1.0` and `1.1`. New
+  integrations should send `1.1`.
 - `request_id`: required unique tracing identifier.
 - `forecast_run_id`: required Pango Core run identifier; opaque to Forecast Service.
 - `frequency`: required; current supported value `weekly`.
@@ -334,32 +335,63 @@ The feature is known into the future by construction, since it reads only the da
 
 ## 14. Forecast response
 
-Captured from the running service, not written by hand. Series 1198 is sold to order and could be profiled; series 1500 sent a negative quantity and could not.
+Captured from the running service, not written by hand. The development policy
+routes series 1198 to the `naive` baseline; series 1500 sent a negative
+quantity and could not be processed.
 
 ```json
 {
   "contract_version": "1.1",
   "service_version": "0.1.0",
-  "policy_version": null,
+  "policy_version": "development-1",
   "request_id": "req-2026-11-02-0001",
   "forecast_run_id": 41,
   "summary": {
     "total": 2,
-    "ok": 0,
-    "error": 2
+    "ok": 1,
+    "error": 1
   },
   "results": [
     {
       "series_id": 1198,
-      "status": "error",
-      "periods": [],
+      "status": "ok",
+      "model_name": "naive",
+      "model_version": "development",
+      "periods": [
+        {
+          "period_start": "2026-11-02",
+          "estimate": 3.0,
+          "lower": 0.0,
+          "upper": 6.0
+        },
+        {
+          "period_start": "2026-11-09",
+          "estimate": 3.0,
+          "lower": 0.0,
+          "upper": 6.0
+        },
+        {
+          "period_start": "2026-11-16",
+          "estimate": 3.0,
+          "lower": 0.0,
+          "upper": 6.0
+        },
+        {
+          "period_start": "2026-11-23",
+          "estimate": 3.0,
+          "lower": 0.0,
+          "upper": 6.0
+        }
+      ],
+      "total": {
+        "estimate": 12.0,
+        "lower": 0.0,
+        "upper": 24.0
+      },
       "warnings": [
         "The series is sold to order, so zero stock was not read as a stockout."
       ],
-      "error": {
-        "code": "MODEL_NOT_AVAILABLE",
-        "message": "No forecasting model is deployed yet: the model policy and the model implementations are not part of this release."
-      },
+      "error": null,
       "profile": {
         "demand_class": "SMOOTH",
         "history_class": "LIMITED",
@@ -399,6 +431,12 @@ Captured from the running service, not written by hand. Series 1198 is sold to o
 
 `profile` is returned whenever the series got far enough to be profiled, **including when it cannot be forecast**: for an inactive or unclassifiable series it is the whole of what the service has to say. It is `null` only when the series failed before that, as 1500 did.
 
+`periods` contains one entry per future Monday-starting week. `total` is the
+calibrated aggregate across the requested horizon. Its interval is not formed
+by summing the weekly lower and upper bounds; each model must provide the
+horizon-total interval explicitly. `total` is `null` for a series that did not
+produce a forecast.
+
 ### The profile block
 
 | Field | Meaning |
@@ -419,7 +457,11 @@ The monthly and the weekly counts disagree on purpose: classification happens mo
 
 ### Not yet populated
 
-`periods` is always empty and `policy_version` is always `null`, because no model policy is deployed. The envelope carries both so that Core can integrate against the final shape. A `model` block does not appear at all yet, for the same reason.
+With the development policy, successful series include four `periods`,
+`model_name`, `model_version` and `policy_version`. Route A can replace the
+development artifact without changing the HTTP envelope. Series that are not
+evaluable or have no applicable policy continue to return an empty `periods`
+array and a stable per-series error.
 
 ## 15. DeepAR metadata
 
@@ -442,6 +484,36 @@ When DeepAR is selected:
 ```
 
 A checkpoint trained for one organization must not automatically be applied to another.
+
+## 15.1 Development policy artifact
+
+Until Route A publishes the evaluated production policy, Route B may load a
+development policy with this shape:
+
+```json
+{
+  "policy_version": "development-1",
+  "frequency": "WEEKLY",
+  "horizon": 4,
+  "params_version": "bd4371bcce546b17",
+  "rules": [
+    {
+      "when": { "demand_class": "SMOOTH" },
+      "model": "naive"
+    }
+  ],
+  "default": {
+    "model": "naive"
+  }
+}
+```
+
+Rules are evaluated in declaration order. A rule may match
+`demand_class`, `history_class`, `stock_handling`, `inactive` or `evaluable`.
+The policy loader rejects an unknown model, an incompatible frequency or
+horizon, and a `params_version` that does not match the domain calibration.
+This policy is for integration testing only; it is not Route A's final model
+selection decision.
 
 ## 16. Per-series failures
 

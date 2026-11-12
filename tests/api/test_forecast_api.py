@@ -112,13 +112,12 @@ def test_the_envelope_echoes_the_request_identifiers(client: TestClient) -> None
     assert body["forecast_run_id"] == payload["forecast_run_id"]
 
 
-def test_no_policy_version_is_reported_while_no_policy_is_loaded(
+def test_development_policy_version_is_reported(
     client: TestClient,
 ) -> None:
-    """Null rather than a placeholder: a made-up version would read as real."""
     response = client.post("/v1/forecasts", json=load_fixture(), headers=AUTH)
 
-    assert response.json()["policy_version"] is None
+    assert response.json()["policy_version"] == "development-1"
 
 
 def test_every_series_gets_a_result_in_request_order(client: TestClient) -> None:
@@ -147,18 +146,27 @@ def test_the_invalid_series_fails_on_its_own(client: TestClient) -> None:
     assert "negative" in invalid["error"]["message"]
 
 
-def test_valid_series_report_that_no_model_is_deployed(
+def test_valid_series_are_forecast_when_the_development_policy_matches(
     client: TestClient,
 ) -> None:
-    """Honest reporting: the pipeline ran, but nothing can forecast yet."""
     response = client.post("/v1/forecasts", json=load_fixture(), headers=AUTH)
     body = response.json()
 
     by_id = {result["series_id"]: result for result in body["results"]}
 
-    for series_id in (1042, 1198, 1255, 1403):
+    for series_id in (1042, 1198):
+        assert by_id[series_id]["status"] == "ok"
+        assert len(by_id[series_id]["periods"]) == 4
+        assert by_id[series_id]["total"] is not None
+        assert by_id[series_id]["total"]["estimate"] == pytest.approx(
+            sum(period["estimate"] for period in by_id[series_id]["periods"])
+        )
+        assert by_id[series_id]["model_name"] == "naive"
+
+    for series_id in (1255, 1403):
         assert by_id[series_id]["error"]["code"] == "MODEL_NOT_AVAILABLE"
         assert by_id[series_id]["periods"] == []
+        assert by_id[series_id]["total"] is None
 
 
 def test_availability_findings_travel_as_warnings(client: TestClient) -> None:
@@ -459,9 +467,9 @@ def test_a_request_is_logged_with_the_contract_fields(
     assert logged["request_id"] == payload["request_id"]
     assert logged["forecast_run_id"] == payload["forecast_run_id"]
     assert logged["series_count"] == len(payload["series"])
-    assert logged["status"] == "error"  # no model, so no series can be ok
+    assert logged["status"] == "partial"
     assert logged["duration_ms"] >= 0
-    assert logged["policy_version"] is None
+    assert logged["policy_version"] == "development-1"
 
 
 def test_the_log_carries_no_part_of_the_payload(

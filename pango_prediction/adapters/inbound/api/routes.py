@@ -25,11 +25,13 @@ from pango_prediction.adapters.inbound.api.schemas import (
     ForecastRequest,
     ForecastResponse,
     HealthResponse,
+    PeriodResponse,
     ProfileResponse,
     SeriesErrorResponse,
     SeriesRequest,
     SeriesResultResponse,
     SummaryResponse,
+    TotalResponse,
 )
 from pango_prediction.application.forecast_service import (
     ForecastCommand,
@@ -135,9 +137,26 @@ def to_series_result(
     return SeriesResultResponse(
         series_id=series_id,
         status="ok" if outcome.ok else "error",
-        # Nothing populates periods until a model exists; the field stays in the
-        # envelope so Pango Core can integrate against the final shape.
-        periods=[],
+        periods=[
+            PeriodResponse(
+                period_start=period.period_start,
+                estimate=period.estimate,
+                lower=period.lower,
+                upper=period.upper,
+            )
+            for period in outcome.periods
+        ],
+        total=(
+            None
+            if outcome.total is None
+            else TotalResponse(
+                estimate=outcome.total.estimate,
+                lower=outcome.total.lower,
+                upper=outcome.total.upper,
+            )
+        ),
+        model_name=outcome.model_name,
+        model_version=outcome.model_version,
         warnings=list(outcome.warnings),
         profile=(None if outcome.profile is None else to_profile(outcome.profile)),
         horizon_business_days=list(outcome.horizon_business_days),
@@ -230,10 +249,9 @@ def build_router(settings: Settings, service: ForecastService) -> APIRouter:
         # histories, and a batch of 500 series would otherwise write megabytes
         # of a tenant's sales per request.
         #
-        # `model_name` and `model_version` are null because no policy is
-        # deployed. They are also mis-placed by the contract: once a policy
-        # exists the model is chosen per series, not per request, so they will
-        # belong to a per-series record rather than to this one.
+        # Model identity is per series, while this log is per request. The
+        # request-level fields therefore remain null; each result carries its
+        # selected model when forecasting succeeds.
         fields = {
             "request_id": request.request_id,
             "forecast_run_id": request.forecast_run_id,
