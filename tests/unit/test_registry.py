@@ -119,8 +119,8 @@ def test_a_registry_cannot_be_edited_after_it_is_built() -> None:
 # --- what this build ships ---
 
 
-def test_the_default_registry_ships_the_baselines() -> None:
-    assert default_registry().names == ("moving_average", "naive", "zero")
+def test_the_default_registry_ships_the_baselines_and_sba() -> None:
+    assert default_registry().names == ("moving_average", "naive", "sba", "zero")
 
 
 def test_each_default_model_answers_to_the_name_it_is_registered_under() -> None:
