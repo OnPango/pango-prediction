@@ -558,6 +558,32 @@ metadata
 
 Checksum verification must occur before using downloaded model artifacts.
 
+### Temporary DeepAR development run
+
+The CPU API does not install PyTorch or load DeepAR. For a local development
+run, install the optional group:
+
+```powershell
+python -c "import subprocess, sys, tomllib; p = tomllib.load(open('pyproject.toml', 'rb')); subprocess.check_call([sys.executable, '-m', 'pip', 'install', *p['dependency-groups']['deepar']])"
+```
+
+Prepare a CSV with the columns `unique_id`, `ds` and `y`, at weekly Monday
+frequency, then train a temporary local artifact:
+
+```powershell
+python -m training.train_deepar `
+  --input .\tmp\deepar_train.csv `
+  --output .\tmp\deepar-equipmaster-v1 `
+  --model-ref deepar-equipmaster-v1 `
+  --params-version bd4371bcce546b17 `
+  --max-steps 20
+```
+
+The output contains `metadata.json` and a `checkpoint/` directory. The loader
+verifies the model reference, frequency, horizon, parameter fingerprint and
+SHA-256 before inference. These files are temporary development artifacts and
+must not be committed or used as production model policy.
+
 ---
 
 # HTTP API
@@ -836,6 +862,30 @@ model execution
  ↓
 ForecastResult
 ```
+
+### Verifying series classification
+
+The contract fixtures exercise the important availability and classification
+segments without requiring a database:
+
+```powershell
+python -m pytest tests/integration/test_backend_request_fixtures.py -q
+python -m pytest tests/api/test_forecast_api.py -q
+```
+
+The fixture must continue to classify these series as follows:
+
+| `series_id` | Scenario | Expected check |
+|---:|---|---|
+| `1042` | Stock managed with short stockout | two `CENSORED` weeks |
+| `1198` | Made to order | no `CENSORED` weeks |
+| `1255` | Out of assortment | fifteen `OUT_OF_ASSORTMENT` weeks |
+| `1403` | Recently stocked | `NOT_CLASSIFIABLE` |
+| `1500` | Invalid negative demand | `INVALID_SERIES` |
+
+These tests call the same `build_weekly_series`,
+`build_weekly_availability` and profile functions used by the HTTP service, so
+they detect classification drift rather than only testing JSON validation.
 
 ---
 

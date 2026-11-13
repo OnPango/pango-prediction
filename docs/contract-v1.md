@@ -123,6 +123,13 @@ POST /v1/forecasts
 Content-Type: application/json
 ```
 
+### Forecast evaluation
+
+```http
+POST /v1/forecast-evaluations
+Content-Type: application/json
+```
+
 ## 6. Forecast request
 
 ```json
@@ -562,7 +569,138 @@ Pango Core owns persistence-level idempotency.
 
 Forecast Service never writes business forecast results directly to PostgreSQL.
 
-## 19. Batching
+## 19. Forecast evaluation
+
+After the forecast horizon has elapsed, Pango Core sends the stored forecast
+and the realised demand to:
+
+```http
+POST /v1/forecast-evaluations
+```
+
+The endpoint uses the same service credential as `/v1/forecasts`. Each period
+contains `estimate`, `lower`, `upper`, `actual` and a required explicit
+`observable` flag. Non-observable periods are excluded from all metrics.
+`observable` must come from the availability snapshot used for the forecast;
+Core must not infer it from `actual == 0`. A censored or out-of-assortment
+period is sent as `observable: false`.
+
+`training_values` contains the historical weekly demand values used for MASE,
+in chronological order and with the same observable-demand semantics. It may
+be omitted when that history is unavailable; in that case MASE is `null`. The
+service uses a four-week seasonal-naive scale.
+
+The request is:
+
+```json
+{
+  "contract_version": "1.1",
+  "request_id": "evaluation-2026-11-30-41",
+  "forecast_run_id": 41,
+  "frequency": "WEEKLY",
+  "horizon": 2,
+  "series": [
+    {
+      "series_id": 1198,
+      "periods": [
+        {
+          "period_start": "2026-11-02",
+          "estimate": 3.0,
+          "lower": 2.0,
+          "upper": 5.0,
+          "actual": 5.0,
+          "observable": true
+        },
+        {
+          "period_start": "2026-11-09",
+          "estimate": 4.0,
+          "lower": 3.0,
+          "upper": 5.0,
+          "actual": 3.0,
+          "observable": false
+        }
+      ],
+      "training_values": [1.0, 2.0, 3.0, 4.0, 2.0],
+      "total": {
+        "estimate": 7.0,
+        "lower": 4.0,
+        "upper": 9.0
+      }
+    }
+  ]
+}
+```
+
+Core should send one evaluation request only after every period in the run
+has closed. The `series_id` and `forecast_run_id` must refer to persisted
+records in Core. `period_start` is Monday, and `periods` must be sent in
+chronological order. `actual` is gross weekly demand and cannot be negative.
+`total` is the original four-week forecast total interval; it is omitted only
+when the forecast did not produce one.
+
+The response is:
+
+```json
+{
+  "contract_version": "1.1",
+  "service_version": "0.1.0",
+  "request_id": "evaluation-2026-11-30-41",
+  "forecast_run_id": 41,
+  "results": [
+    {
+      "series_id": 1198,
+      "metrics": {
+        "evaluated_periods": 1,
+        "actual_total": 5.0,
+        "estimate_total": 3.0,
+        "error_total": 2.0,
+        "wape": 0.4,
+        "bias": 0.4,
+        "mae": 2.0,
+        "mase": 2.0,
+        "interval_coverage": 1.0,
+        "total_inside_interval": true
+      }
+    }
+  ],
+  "aggregate": {
+    "evaluated_periods": 1,
+    "actual_total": 5.0,
+    "estimate_total": 3.0,
+    "error_total": 2.0,
+    "wape": 0.4,
+    "bias": 0.4,
+    "mae": 2.0,
+    "mase": null,
+    "interval_coverage": 1.0,
+    "total_inside_interval": true
+  }
+}
+```
+
+Core persists the response in a child table keyed by
+`(forecast_run_id, series_id)`. Repeated requests with the same
+`forecast_run_id` must be idempotent: Core may upsert the metrics, but must
+not create a second official evaluation.
+
+The response contains metrics per series and an `aggregate` across all
+observable periods. The official metrics are:
+
+```text
+error = actual - estimate
+WAPE = sum(abs(error)) / sum(actual)
+Bias = sum(error) / sum(actual)
+MAE = mean(abs(error))
+MASE = MAE / seasonal-naive scale
+interval_coverage = periods inside [lower, upper] / evaluated periods
+```
+
+When the observable actual total is zero, WAPE and Bias are `null`. When MASE
+does not have enough history or has a zero scale, it is `null`. Pango Core
+persists the request facts and the returned metrics; Prediction calculates the
+official values.
+
+## 20. Batching
 
 The service should enforce a configurable:
 
@@ -572,7 +710,7 @@ MAX_SERIES_PER_REQUEST
 
 If needed, Pango Core may split large jobs into multiple calls while keeping the same contract.
 
-## 20. Logging
+## 21. Logging
 
 Log at least:
 
@@ -589,7 +727,7 @@ status
 
 Do not log full historical payloads by default.
 
-## 21. Compatibility rule
+## 22. Compatibility rule
 
 Changes to weekly semantics, availability rules, profiling, request fields or output semantics must be reflected in:
 

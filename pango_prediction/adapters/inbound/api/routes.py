@@ -15,19 +15,23 @@ import secrets
 import time
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, HTTPException
 
 from pango_prediction.adapters.inbound.api.errors import (
     batch_too_large,
     unauthorized,
 )
 from pango_prediction.adapters.inbound.api.schemas import (
+    ForecastEvaluationRequest,
+    ForecastEvaluationResponse,
     ForecastRequest,
     ForecastResponse,
     HealthResponse,
+    MetricsResponse,
     PeriodResponse,
     ProfileResponse,
     SeriesErrorResponse,
+    SeriesEvaluationResponse,
     SeriesRequest,
     SeriesResultResponse,
     SummaryResponse,
@@ -45,6 +49,12 @@ from pango_prediction.config import (
     Settings,
 )
 from pango_prediction.domain.calendar import ClosedDates
+from pango_prediction.domain.evaluation import (
+    EvaluationPeriod,
+    EvaluationTotal,
+    ForecastMetrics,
+    evaluate_forecast,
+)
 from pango_prediction.domain.types import (
     DemandObservation,
     DemandProfile,
@@ -61,6 +71,21 @@ composition root, because uvicorn configures only its own loggers and leaves
 the root one without any - so these records would otherwise be dropped at
 root's default WARNING.
 """
+
+
+def to_metrics_response(metrics: ForecastMetrics) -> MetricsResponse:
+    return MetricsResponse(
+        evaluated_periods=metrics.evaluated_periods,
+        actual_total=metrics.actual_total,
+        estimate_total=metrics.estimate_total,
+        error_total=metrics.error_total,
+        wape=metrics.wape,
+        bias=metrics.bias,
+        mae=metrics.mae,
+        mase=metrics.mase,
+        interval_coverage=metrics.interval_coverage,
+        total_inside_interval=metrics.total_inside_interval,
+    )
 
 
 def to_series_input(series: SeriesRequest) -> ForecastSeriesInput:
@@ -280,6 +305,116 @@ def build_router(settings: Settings, service: ForecastService) -> APIRouter:
                 error=batch.error_count,
             ),
             results=results,
+        )
+
+    @router.post(
+        "/v1/forecast-evaluations",
+        response_model=ForecastEvaluationResponse,
+        dependencies=[Depends(require_service_token)],
+    )
+    def evaluate_forecasts(
+        request: ForecastEvaluationRequest,
+    ) -> ForecastEvaluationResponse:
+        """Evaluate completed forecasts against realised demand.
+
+        This is deliberately a separate endpoint: actual demand is only
+        available after the forecast horizon has elapsed.
+        """
+        if len(request.series) > settings.max_series_per_request:
+            raise batch_too_large(
+                len(request.series),
+                settings.max_series_per_request,
+            )
+        series_ids = [series.series_id for series in request.series]
+        if len(set(series_ids)) != len(series_ids):
+            raise HTTPException(
+                status_code=422,
+                detail="series_id must be unique within an evaluation request",
+            )
+
+        results: list[SeriesEvaluationResponse] = []
+        all_periods: list[EvaluationPeriod] = []
+        total_estimate = 0.0
+        total_lower = 0.0
+        total_upper = 0.0
+        has_totals = True
+
+        for series in request.series:
+            if len(series.periods) != request.horizon:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"series {series.series_id} must contain exactly "
+                        f"{request.horizon} periods"
+                    ),
+                )
+            periods = tuple(
+                EvaluationPeriod(
+                    period_start=period.period_start,
+                    estimate=period.estimate,
+                    lower=period.lower,
+                    upper=period.upper,
+                    actual=period.actual,
+                    observable=period.observable,
+                )
+                for period in series.periods
+            )
+            total = (
+                None
+                if series.total is None
+                else EvaluationTotal(
+                    estimate=series.total.estimate,
+                    lower=series.total.lower,
+                    upper=series.total.upper,
+                )
+            )
+            try:
+                metrics = evaluate_forecast(
+                    periods,
+                    training_values=series.training_values,
+                    total=total,
+                )
+            except ValueError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
+
+            results.append(
+                SeriesEvaluationResponse(
+                    series_id=series.series_id,
+                    metrics=to_metrics_response(metrics),
+                )
+            )
+            all_periods.extend(periods)
+            if total is None:
+                has_totals = False
+            else:
+                total_estimate += total.estimate
+                total_lower += total.lower
+                total_upper += total.upper
+
+        aggregate_total = (
+            None
+            if not has_totals
+            else EvaluationTotal(
+                estimate=total_estimate,
+                lower=total_lower,
+                upper=total_upper,
+            )
+        )
+        try:
+            aggregate = evaluate_forecast(
+                tuple(all_periods),
+                total=aggregate_total,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+        return ForecastEvaluationResponse(
+            contract_version=CONTRACT_VERSION,
+            service_version=SERVICE_VERSION,
+            request_id=request.request_id,
+            forecast_run_id=request.forecast_run_id,
+            results=results,
+            aggregate=to_metrics_response(aggregate),
         )
 
     return router

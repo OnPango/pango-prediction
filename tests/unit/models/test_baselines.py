@@ -331,3 +331,33 @@ def test_an_availability_for_another_series_is_rejected() -> None:
             availability=build_weekly_availability(other, ()),
             horizon=HORIZON,
         )
+
+
+# --- the horizon total is read from real 4-week sums (D4) ---
+
+# 40 intermittent weeks. Reference values from an independent numpy computation
+# of the same recipe; the old weekly-residuals-times-4 upper bound is in each
+# comment, to show what the correction changes.
+SERIES_A = (3.0, 0, 0, 2, 0, 5, 0, 0, 0, 1, 0, 4, 0, 0, 2, 0, 0, 0, 0, 6,
+            0, 1, 0, 0, 3, 0, 2, 0, 0, 0, 4, 0, 0, 1, 0, 0, 5, 0, 0, 2)
+
+
+@pytest.mark.parametrize(
+    ("model", "params", "expected"),
+    [
+        (ZeroModel(), None, (0.0, 0.0, 7.0)),  # x4 upper: 16.0
+        (NaiveModel(), None, (8.0, 0.0, 15.0)),  # x4 upper: 24.0
+        (MovingAverageModel(), {"window": 4}, (7.0, 2.2, 11.8)),  # x4: 0.5-21.5
+    ],
+)
+def test_the_total_interval_matches_the_horizon_sum_reference(
+    model: ForecastModel,
+    params: dict[str, object] | None,
+    expected: tuple[float, float, float],
+) -> None:
+    request = make_request(tuple(float(v) for v in SERIES_A), params=params)
+    total = model.predict_total(request, model.predict(request))  # type: ignore[attr-defined]
+
+    assert (total.estimate, total.lower, total.upper) == pytest.approx(
+        expected, abs=1e-9
+    )

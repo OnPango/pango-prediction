@@ -2,8 +2,12 @@ import pytest
 
 from pango_prediction.domain.intervals import (
     DEFAULT_QUANTILES,
+    MIN_HORIZON_RESIDUALS,
     IntervalQuantiles,
     empirical_interval,
+    horizon_residuals,
+    horizon_total_interval,
+    one_step_residuals,
     quantile,
 )
 
@@ -106,3 +110,61 @@ def test_no_residuals_is_refused_rather_than_given_a_zero_width_interval() -> No
     """A zero-width interval would satisfy the schema while saying nothing."""
     with pytest.raises(ValueError, match="at least one residual"):
         empirical_interval(5.0, [], DEFAULT_QUANTILES)
+
+
+# --- the interval of the horizon total (D4) ---
+
+
+def test_one_step_residuals_skip_origins_without_a_forecast() -> None:
+    assert one_step_residuals((3.0, 1.0, 4.0), (None, 2.0, 2.5)) == (-1.0, 1.5)
+
+
+def test_horizon_residuals_compare_real_sums_with_the_flat_total() -> None:
+    values = (1.0, 0.0, 2.0, 3.0, 0.0)
+    forecasts = (None, 1.0, 0.5, 1.0, 1.5)
+
+    # Origin 1: 0+2 - 2*1 = 0. Origin 2: 2+3 - 2*0.5 = 4. Origin 3: 3+0 - 2*1 = 1.
+    # Origin 4 has no complete two-week window and is skipped.
+    assert horizon_residuals(values, forecasts, horizon=2) == (0.0, 4.0, 1.0)
+
+
+def test_horizon_residuals_need_one_forecast_per_week() -> None:
+    with pytest.raises(ValueError, match="one origin forecast per observed week"):
+        horizon_residuals((1.0, 2.0), (None,), horizon=2)
+
+
+def test_horizon_residuals_reject_an_empty_horizon() -> None:
+    with pytest.raises(ValueError, match="at least one period"):
+        horizon_residuals((1.0,), (0.0,), horizon=0)
+
+
+def test_the_total_interval_is_read_from_horizon_sums_when_there_are_enough() -> None:
+    # Ten weeks of 1 forecast at 1: every two-week sum matches its total exactly,
+    # so the sums give a zero-width interval, unlike the scaled weekly residuals.
+    values = (1.0, 3.0, 0.0, 2.0, 1.0, 1.0, 3.0, 0.0, 2.0, 0.0)
+    forecasts = (None, *(1.0,) * 9)
+    sums = horizon_residuals(values, forecasts, horizon=2)
+    assert len(sums) >= MIN_HORIZON_RESIDUALS
+
+    total, lower, upper = horizon_total_interval(
+        1.0, values, forecasts, horizon=2, quantiles=DEFAULT_QUANTILES
+    )
+
+    assert total == 2.0
+    assert (lower, upper) == empirical_interval(2.0, sums, DEFAULT_QUANTILES)
+
+
+def test_the_total_interval_falls_back_to_scaled_weekly_residuals_on_short_series(
+) -> None:
+    values = (1.0, 3.0, 0.0, 2.0)
+    forecasts = (None, 1.0, 1.0, 1.0)
+    weekly = one_step_residuals(values, forecasts)
+
+    total, lower, upper = horizon_total_interval(
+        1.0, values, forecasts, horizon=2, quantiles=DEFAULT_QUANTILES
+    )
+
+    assert total == 2.0
+    assert (lower, upper) == empirical_interval(
+        2.0, [residual * 2 for residual in weekly], DEFAULT_QUANTILES
+    )

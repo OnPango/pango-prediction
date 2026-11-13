@@ -17,7 +17,10 @@ is seasonal, so the contraction is the correct treatment for all of them.
 from collections.abc import Mapping, Sequence
 
 from pango_prediction.domain.availability import observed_demand
-from pango_prediction.domain.intervals import empirical_interval
+from pango_prediction.domain.intervals import (
+    empirical_interval,
+    horizon_total_interval,
+)
 from pango_prediction.domain.series import future_weeks
 from pango_prediction.domain.types import ForecastPeriod, ForecastTotal
 from pango_prediction.ports.model import (
@@ -53,16 +56,22 @@ def _flat_forecast(
 def _total_forecast(
     request: ModelRequest,
     estimate: float,
-    residuals: Sequence[float],
+    values: Sequence[float],
+    origin_forecasts: Sequence[float | None],
 ) -> ForecastTotal:
-    horizon_estimate = estimate * request.horizon
-    horizon_residuals = [residual * request.horizon for residual in residuals]
-    lower, upper = empirical_interval(
-        horizon_estimate,
-        horizon_residuals,
+    """The horizon total, with its interval read from real horizon sums (D4).
+
+    ``origin_forecasts[t]`` is what the model would have forecast for each week
+    from ``t`` on, using ``values[:t]`` only.
+    """
+    total, lower, upper = horizon_total_interval(
+        estimate,
+        values,
+        origin_forecasts,
+        request.horizon,
         request.quantiles,
     )
-    return ForecastTotal(estimate=horizon_estimate, lower=lower, upper=upper)
+    return ForecastTotal(estimate=total, lower=lower, upper=upper)
 
 
 def _history(request: ModelRequest, minimum: int, model: str) -> tuple[float, ...]:
@@ -115,7 +124,12 @@ class ZeroModel:
     ) -> ForecastTotal:
         del periods
         values = _history(request, minimum=1, model=self.name)
-        return _total_forecast(request, estimate=0.0, residuals=values)
+        return _total_forecast(
+            request,
+            estimate=0.0,
+            values=values,
+            origin_forecasts=[0.0] * len(values),
+        )
 
 
 class NaiveModel:
@@ -139,10 +153,12 @@ class NaiveModel:
     ) -> ForecastTotal:
         del periods
         values = _history(request, minimum=2, model=self.name)
-        residuals = [
-            later - earlier for earlier, later in zip(values, values[1:], strict=False)
-        ]
-        return _total_forecast(request, estimate=values[-1], residuals=residuals)
+        return _total_forecast(
+            request,
+            estimate=values[-1],
+            values=values,
+            origin_forecasts=[None, *values[:-1]],
+        )
 
 
 class MovingAverageModel:
@@ -180,14 +196,15 @@ class MovingAverageModel:
         del periods
         window = _positive_int_param(request.params, "window", self.name)
         values = _history(request, minimum=window + 1, model=self.name)
-        residuals = [
-            values[index] - _mean(values[index - window : index])
+        origin_forecasts: list[float | None] = [None] * window + [
+            _mean(values[index - window : index])
             for index in range(window, len(values))
         ]
         return _total_forecast(
             request,
             estimate=_mean(values[-window:]),
-            residuals=residuals,
+            values=values,
+            origin_forecasts=origin_forecasts,
         )
 
 

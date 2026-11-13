@@ -104,7 +104,7 @@ def test_the_app_exposes_the_documented_routes() -> None:
 
     paths = set(app.openapi()["paths"])
 
-    assert paths == {"/health", "/v1/forecasts"}
+    assert paths == {"/health", "/v1/forecasts", "/v1/forecast-evaluations"}
 
 
 def test_there_is_no_module_level_app() -> None:

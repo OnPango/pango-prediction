@@ -98,6 +98,64 @@ class TotalResponse(_Schema):
     upper: float
 
 
+class EvaluationPeriodRequest(_Schema):
+    period_start: date
+    estimate: float
+    lower: float
+    upper: float
+    actual: float
+    observable: bool
+
+
+class EvaluationTotalRequest(_Schema):
+    estimate: float
+    lower: float
+    upper: float
+
+
+class EvaluationSeriesRequest(_Schema):
+    series_id: int
+    periods: Annotated[list[EvaluationPeriodRequest], Field(min_length=1)]
+    training_values: list[float] = Field(default_factory=list)
+    total: EvaluationTotalRequest | None = None
+
+
+class ForecastEvaluationRequest(_Schema):
+    contract_version: Literal["1.0", "1.1"]
+    request_id: str = Field(min_length=1)
+    forecast_run_id: int
+    frequency: Literal["WEEKLY"]
+    horizon: Annotated[int, Field(ge=1)]
+    series: Annotated[list[EvaluationSeriesRequest], Field(min_length=1)]
+
+
+class MetricsResponse(_Schema):
+    evaluated_periods: int
+    actual_total: float
+    estimate_total: float
+    error_total: float
+    wape: float | None
+    bias: float | None
+    mae: float | None
+    mase: float | None
+    interval_coverage: float | None
+    total_inside_interval: bool | None
+
+
+class SeriesEvaluationResponse(_Schema):
+    series_id: int
+    metrics: MetricsResponse
+
+
+class ForecastEvaluationResponse(_Schema):
+    contract_version: str
+    service_version: str
+    request_id: str
+    forecast_run_id: int
+    results: list[SeriesEvaluationResponse]
+    aggregate: MetricsResponse
+
+
 class SeriesErrorResponse(_Schema):
     code: str
     message: str
