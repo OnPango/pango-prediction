@@ -22,6 +22,7 @@ from pango_prediction.ports.model import (
     ForecastModel,
     InsufficientHistoryError,
     ModelRequest,
+    ModelUnavailableError,
 )
 
 WEEK_1 = date(2026, 10, 5)  # Monday
@@ -236,21 +237,21 @@ def test_moving_average_requires_its_window_from_the_policy() -> None:
     """An unstated window would silently differ from the evaluated model."""
     request = make_request((1.0, 2.0, 3.0, 4.0))
 
-    with pytest.raises(ValueError, match="integer 'window'"):
+    with pytest.raises(ModelUnavailableError, match="integer 'window'"):
         MovingAverageModel().predict(request)
 
 
 def test_moving_average_rejects_a_non_integer_window() -> None:
     request = make_request((1.0, 2.0, 3.0, 4.0), params={"window": 2.5})
 
-    with pytest.raises(ValueError, match="integer 'window'"):
+    with pytest.raises(ModelUnavailableError, match="integer 'window'"):
         MovingAverageModel().predict(request)
 
 
 def test_moving_average_rejects_a_window_below_one() -> None:
     request = make_request((1.0, 2.0, 3.0, 4.0), params={"window": 0})
 
-    with pytest.raises(ValueError, match="at least 1"):
+    with pytest.raises(ModelUnavailableError, match="at least 1"):
         MovingAverageModel().predict(request)
 
 

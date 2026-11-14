@@ -18,7 +18,11 @@ from pango_prediction.adapters.outbound.croston import (
 from pango_prediction.adapters.outbound.registry import default_registry
 from pango_prediction.domain.availability import build_weekly_availability
 from pango_prediction.domain.types import RegularizedSeries, StockObservation
-from pango_prediction.ports.model import InsufficientHistoryError, ModelRequest
+from pango_prediction.ports.model import (
+    InsufficientHistoryError,
+    ModelRequest,
+    ModelUnavailableError,
+)
 
 TOLERANCE = 1e-9
 WEEK_1 = date(2026, 10, 5)  # Monday
@@ -185,13 +189,13 @@ def test_alpha_comes_from_the_policy_params() -> None:
 
 @pytest.mark.parametrize("alpha", [0, -0.1, 1.5])
 def test_an_alpha_outside_the_unit_range_is_rejected(alpha: float) -> None:
-    with pytest.raises(ValueError, match="'alpha' between"):
+    with pytest.raises(ModelUnavailableError, match="'alpha' between"):
         SbaModel().predict(make_request(SERIES_A, params={"alpha": alpha}))
 
 
 @pytest.mark.parametrize("alpha", [True, "0.1"])
 def test_a_non_numeric_alpha_is_rejected(alpha: object) -> None:
-    with pytest.raises(ValueError, match="numeric 'alpha'"):
+    with pytest.raises(ModelUnavailableError, match="numeric 'alpha'"):
         SbaModel().predict(make_request(SERIES_A, params={"alpha": alpha}))
 
 
