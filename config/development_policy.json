@@ -8,13 +8,12 @@
       "when": {
         "inactive": true
       },
-      "reason": "Inactive series are not forecast by the development policy."
+      "reason": "inactive"
     },
     {
       "when": {
         "evaluable": false
-      },
-      "reason": "The series has too little observable history for an individual forecast."
+      }
     },
     {
       "when": {

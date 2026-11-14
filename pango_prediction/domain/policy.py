@@ -17,6 +17,7 @@ from pango_prediction.domain.types import (
     DemandProfile,
     HistoryClass,
     ModelSpec,
+    NoForecastReason,
     StockHandling,
 )
 
@@ -27,10 +28,18 @@ class PolicyError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class PolicyDecision:
-    """The result of applying policy rules to one demand profile."""
+    """The result of applying policy rules to one demand profile.
+
+    Three shapes, and the difference matters downstream:
+
+    - a ``model``: forecast the series with it;
+    - no model and a ``reason``: the policy declines the series on purpose;
+    - neither: the policy has nothing for the series and does not say why,
+      which is reported as a missing model rather than as a decision.
+    """
 
     model: ModelSpec | None
-    reason: str | None = None
+    reason: NoForecastReason | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +51,7 @@ class PolicyRule:
     """
 
     model: ModelSpec | None
-    reason: str | None
+    reason: NoForecastReason | None
     demand_class: DemandClass | None = None
     history_class: HistoryClass | None = None
     stock_handling: StockHandling | None = None
@@ -189,8 +198,13 @@ def _parse_rule(
                 f"available models: {', '.join(sorted(registry_names)) or 'none'}"
             )
 
-    if reason is not None and not isinstance(reason, str):
-        raise PolicyError(f"{location}.reason must be a string")
+    no_forecast_reason = _reason(reason, location)
+
+    if model_name is not None and no_forecast_reason is not None:
+        raise PolicyError(
+            f"{location} states both a model and a reason; a rule either "
+            "forecasts a series or declines it"
+        )
 
     params = value.get("params", {})
     if not isinstance(params, Mapping):
@@ -198,7 +212,7 @@ def _parse_rule(
 
     return PolicyRule(
         model=None if model_name is None else ModelSpec(model_name, dict(params)),
-        reason=reason,
+        reason=no_forecast_reason,
         demand_class=_enum_condition(
             conditions, "demand_class", DemandClass, location
         ),
@@ -211,6 +225,30 @@ def _parse_rule(
         inactive=_bool_condition(conditions, "inactive", location),
         evaluable=_bool_condition(conditions, "evaluable", location),
     )
+
+
+def _reason(raw: object, location: str) -> NoForecastReason | None:
+    """Read a rule's ``reason`` from the closed no-forecast vocabulary.
+
+    Checked as strictly as a model name, and for the same purpose: a misspelt
+    reason would otherwise turn a declined series into something else without
+    anyone being told. It surfaces here, when the artifact is loaded.
+    """
+    if raw is None:
+        return None
+
+    allowed = ", ".join(reason.value for reason in NoForecastReason)
+
+    if not isinstance(raw, str):
+        raise PolicyError(f"{location}.reason must be one of: {allowed}")
+
+    try:
+        return NoForecastReason(raw)
+    except ValueError as error:
+        raise PolicyError(
+            f"{location}.reason {raw!r} is not a no-forecast reason; "
+            f"expected one of: {allowed}"
+        ) from error
 
 
 def _enum_condition(

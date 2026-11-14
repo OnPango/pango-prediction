@@ -32,7 +32,7 @@ def policy() -> ModelPolicy:
             "frequency": "WEEKLY",
             "horizon": POLICY_HORIZON,
             "params_version": DEFAULT_PARAMETERS.fingerprint(),
-            "rules": [{"when": {"inactive": True}, "reason": "Not forecast."}],
+            "rules": [{"when": {"inactive": True}, "reason": "inactive"}],
             "default": {"model": "naive"},
         },
         registry_names=frozenset(default_registry().names),

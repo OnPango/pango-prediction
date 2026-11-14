@@ -79,6 +79,40 @@ class StockHandling(StrEnum):
     NOT_CLASSIFIABLE = "NOT_CLASSIFIABLE"
 
 
+class NoForecastReason(StrEnum):
+    """Why a series is deliberately not forecast.
+
+    Declining a series is a decision, not a failure: most of a catalogue is
+    inactive products and warehouses that hold no stock, and none of that is
+    something going wrong. The set is closed and was agreed with Route A, so a
+    policy naming anything else is a broken artifact.
+
+    The values are lower case because they are the ones a policy file states in
+    its ``reason`` key and the ones the response returns, unchanged.
+
+    INACTIVE
+        The series has not sold within the tenant's inactivity window (S29).
+    SOLD_TO_ORDER
+        The series is routed away because it is sold to order. Reserved for a
+        later policy: policy v1 has no rule that uses it. Not the same thing as
+        `StockHandling.MADE_TO_ORDER`, which only describes how zero stock is
+        read.
+    NON_STOCK_WAREHOUSE
+        The warehouse holds no stock, so its demand must not drive
+        replenishment.
+    NO_ACTIVE_WAREHOUSE
+        The product has no active warehouse to receive a forecast.
+    HISTORY_ONLY
+        The series is sent for its history and is not itself forecast.
+    """
+
+    INACTIVE = "inactive"
+    SOLD_TO_ORDER = "sold_to_order"
+    NON_STOCK_WAREHOUSE = "non_stock_warehouse"
+    NO_ACTIVE_WAREHOUSE = "no_active_warehouse"
+    HISTORY_ONLY = "history_only"
+
+
 @dataclass(frozen=True, slots=True)
 class WeeklyAvailability:
     """Availability of a weekly series, aligned to ``RegularizedSeries.dates``.

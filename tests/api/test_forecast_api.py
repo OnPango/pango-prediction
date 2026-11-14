@@ -558,7 +558,7 @@ def forecasts_with_policy(
             "rules": [
                 {
                     "when": {"inactive": True},
-                    "reason": "Inactive series are not forecast.",
+                    "reason": "inactive",
                 }
             ],
             "default": {"model": model, "params": params},

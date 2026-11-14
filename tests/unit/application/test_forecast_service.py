@@ -318,7 +318,7 @@ def policy_routing_everything_to(
             "rules": [
                 {
                     "when": {"inactive": True},
-                    "reason": "Inactive series are not forecast.",
+                    "reason": "inactive",
                 }
             ],
             "default": {"model": model, "params": params},
