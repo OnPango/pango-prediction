@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 
 from pango_prediction.adapters.inbound.api.errors import (
     batch_too_large,
+    horizon_mismatch,
     unauthorized,
 )
 from pango_prediction.adapters.inbound.api.schemas import (
@@ -37,6 +38,7 @@ from pango_prediction.adapters.inbound.api.schemas import (
     SummaryResponse,
     TotalResponse,
 )
+from pango_prediction.application.errors import HorizonMismatchError
 from pango_prediction.application.forecast_service import (
     ForecastCommand,
     ForecastService,
@@ -242,7 +244,8 @@ def build_router(settings: Settings, service: ForecastService) -> APIRouter:
 
         Answers 200 even when individual series fail: each result carries its
         own status and stable code (plan B17). A non-200 is reserved for
-        failures affecting the whole request.
+        failures affecting the whole request, such as a horizon the loaded
+        policy is not calibrated for.
         """
         if len(request.series) > settings.max_series_per_request:
             raise batch_too_large(
@@ -251,7 +254,12 @@ def build_router(settings: Settings, service: ForecastService) -> APIRouter:
             )
 
         started = time.perf_counter()
-        batch = service.run(to_command(request))
+
+        try:
+            batch = service.run(to_command(request))
+        except HorizonMismatchError as error:
+            raise horizon_mismatch(str(error)) from error
+
         duration_ms = (time.perf_counter() - started) * 1000
 
         results = [
