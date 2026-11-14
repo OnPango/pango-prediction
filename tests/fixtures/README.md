@@ -28,7 +28,8 @@ $env:PYTHONPATH="."; python tests/fixtures/build_fixtures.py
 | `frequency` | string | `forecast_runs.granularity`, seeded from `settings.forecast_granularity` (default `WEEKLY`) |
 | `horizon` | integer | `forecast_runs.horizon` (`smallint`, `CHECK horizon >= 1`) |
 | `history_end` | date | Core's cutoff. **Must be a Sunday**, or the final partial week is dropped |
-| `calendar.closed_dates` | date[] | No column. Unresolved, see below |
+| `calendar.closed_dates` | date[] | No column. Dates no warehouse operates; see "The calendar" below |
+| `calendar.closed_dates_by_warehouse` | object | No column. Extra closed dates of one warehouse, keyed by `warehouses.id` |
 
 ## Series → schema
 
@@ -78,34 +79,40 @@ and matches how Core derives stock: movements only exist on days something
 moved. Availability carries the last known balance forward, so the gaps are
 safe, and the payload stays an order of magnitude smaller.
 
-## Where these differ from `contract-v1.md` §8
+## Where these differ from `contract-v1.md`
 
-| Contract field | Change | Why |
+Contract `1.1` adopted three of the changes these fixtures proposed: identifiers
+are integers, `frequency` is `"WEEKLY"`, and `metadata.made_to_order` is gone
+from the contract. What still differs sits inside `metadata`, which the
+contract leaves optional and free-form:
+
+| Contract example | Fixtures | Why |
 |---|---|---|
-| `metadata.group2` | replaced by `metadata.category` | `group2` is a World Office concept of one tenant's history. The schema classifies through `categories`, hierarchical via `products.category_id` |
-| `metadata.made_to_order` | **removed** | No such column exists on `products` or `product_warehouses`, and the service derives it from history (S24) |
-| — | added `metadata.lead_time_days` | The horizon is `H = R + L`, and the schema holds `L` per product-warehouse |
-| — | added `metadata.warehouse_type` | The analysis excluded dropshipping warehouses when estimating the replenishment interval, because they buy to order |
-| `frequency: "weekly"` | `"WEEKLY"` | Matches the schema enum rather than the contract's lowercase example |
-| `series_id: "pw-7a8b"` | integer | The schema stores integer ids; the contract's example strings are not reachable |
+| `metadata.group2` | `metadata.category` | `group2` is a World Office concept of one tenant's history. The schema classifies through `categories`, hierarchical via `products.category_id` |
+| — | `metadata.lead_time_days` | The horizon is `H = R + L`, and the schema holds `L` per product-warehouse |
+| — | `metadata.warehouse_type` | The analysis excluded dropshipping warehouses when estimating the replenishment interval, because they buy to order |
 
-These are proposals for contract `1.1`, not silent edits: `contract-v1.md` still
-documents version `1.0`.
+The fixtures declare `contract_version` `1.0` on purpose. The service is on
+`1.1` and accepts either, so they double as the proof that a `1.0` client keeps
+working (`build_fixtures.py`).
 
-## Unresolved: the calendar
+## The calendar
 
-`closed_dates` is empty on purpose. Two questions are open now that the grain is
-product × warehouse:
+`closed_dates` and `closed_dates_by_warehouse` are both empty in these
+fixtures. The calendar has its own tests, in
+`tests/unit/domain/test_calendar.py` and in the forecast service tests.
 
-- Are closures **per request or per warehouse**? One warehouse can close for a
-  physical inventory count while the others keep operating, and the request
-  currently carries a single list.
-- **Who computes Colombian public holidays** — Core, or the service? The
-  analysis used the `holidays` package, and also found the company does not
-  invoice on Holy Saturday, which is not an official holiday.
+The two questions that were open here are decided (`docs/domain-rules.md` §7
+and §13, item 1) and implemented in `pango_prediction/domain/calendar.py`:
 
-Both are listed as open decisions in `docs/domain-rules.md` §12, and the
-calendar module is not implemented yet.
+- Closures are **both** per request and per warehouse, resolved as a union.
+  `closed_dates` applies to every warehouse, and `closed_dates_by_warehouse`
+  adds the dates one warehouse is closed, so a physical inventory count in one
+  warehouse does not touch the others.
+- **Core sends every non-operational date**, public holidays included. The
+  service computes no holidays and knows no country: the weekday weight rule is
+  shared code, and the dates are data. That also covers what a holiday package
+  misses, such as Holy Saturday and the company's own shutdown.
 
 ## Segments
 
