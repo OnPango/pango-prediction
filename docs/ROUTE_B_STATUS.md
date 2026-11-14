@@ -166,11 +166,16 @@ For the current defaults: **`f5f416da285217b5`**. Route A confirmed that the
 fingerprint comes from `DomainParameters.fingerprint()` and is frozen with the
 tag.
 
-### 5.3 `zero` is not in the model enum
+### 5.3 `zero` is not in the model enum — resolved
 
-Route B ships `zero` as the benchmark every other model must beat. It is absent from the policy's model enum, so no rule can route to it — yet forecasting zero is the natural answer for an inactive series (26 weeks without a sale, S29), and the enum currently offers only `pooled_rate` for that. **Should `zero` be selectable?**
+Route B ships `zero` as the benchmark every other model must beat. It is
+absent from the policy's model enum, so no rule can route to it. Forecasting
+zero remains a reference behavior, not a selectable policy model.
 
-### 5.4 `INSUFFICIENT` against `NOT_CLASSIFIABLE`
+Route A confirmed that `zero` remains a reference only and is not a candidate or
+policy model in v1.
+
+### 5.4 `INSUFFICIENT` against `NOT_CLASSIFIABLE` — resolved
 
 The notebook distinguishes two failures that the earlier five-class proposal conflated. Route B maps them onto the two values the enum already has:
 
@@ -179,15 +184,26 @@ The notebook distinguishes two failures that the earlier five-class proposal con
 | `INSUFFICIENT` | There is a monthly series; its statistics cannot be computed | `insuficiente` (44 % of products) |
 | `NOT_CLASSIFIABLE` | There is no monthly series: every month was spent in a stockout | `sin serie mensual` |
 
-**Confirm the mapping.** Separately: `history_class` and `demand_class` both having an `INSUFFICIENT`-shaped value is a name collision waiting to confuse — Route B named the history classes `NEW` / `LIMITED` / `MATURE` to avoid it.
+Route A confirmed this mapping. `history_class` and `demand_class` retain the
+separate `NEW` / `LIMITED` / `MATURE` and demand-class vocabularies.
 
-### 5.5 `MADE_TO_ORDER` means two different things
+### 5.5 `MADE_TO_ORDER` means two different things — resolved for v1
 
 The notebook's S24 classes **332 series** as sold to order, while only **13** are routed to an aggregated forecast. If the policy's rules match on `MADE_TO_ORDER` expecting the 13, they will catch 332. Route B reports the S24 class in `profile.stock_handling`; the routing decision needs its own name.
 
-### 5.6 `NO_FORECAST` is a status, not an error
+Route A confirmed that `MADE_TO_ORDER` is only the S24 stock-handling class.
+If v2 adds the aggregate-routing rule, its policy condition will be named
+`sold_to_order`; v1 has no such rule.
+
+### 5.6 `NO_FORECAST` is a status, not an error — contract work remains
 
 Route A's reply sketches a third outcome with a reason (`non_stock_warehouse`). Route B has not created it, because the status set belongs to the contract and the policy format. Today those series come back as `MODEL_NOT_AVAILABLE` with warnings. **The contract needs a third status.**
+
+Route A closed the reason vocabulary at `inactive`, `sold_to_order`,
+`non_stock_warehouse`, `no_active_warehouse` and `history_only`; v1 has no
+`sold_to_order` rule. The current service contract still needs a follow-up
+feature to expose these outcomes consistently. History insufficiency remains
+an error path until the policy routes it before model execution.
 
 ### 5.7 How does the service learn a warehouse holds stock?
 

@@ -390,7 +390,8 @@ Two classes answer the two different ways classification fails, which the earlie
 | `INSUFFICIENT` | There is a monthly series; its statistics cannot be computed from it | `insuficiente` |
 | `NOT_CLASSIFIABLE` | There is no monthly series: every month was spent in a stockout | `sin serie mensual` |
 
-Both values exist in Route A's `demand_class` enum, so this mapping needs its confirmation rather than new enum values.
+Both values exist in Route A's `demand_class` enum. Route A confirmed this
+mapping rather than introducing new enum values.
 
 ---
 
@@ -412,7 +413,11 @@ Monthly quadrants inside the individual-forecast group: 750 intermittent, 258 lu
 1. The policy format sketched in `README.md` maps `demand_class → model`. That is not expressive enough.
 2. There must be a **"no forecast"** outcome. Three quarters of the catalogue falls into it, and the current format cannot represent it.
 
-This is Route A's decision to finalise. Route B only loads and executes it.
+Route A confirmed the v1 scope: `zero` is a reference only, the policy has no
+`sold_to_order` rule, and the five no-forecast reasons are
+`inactive`, `sold_to_order`, `non_stock_warehouse`, `no_active_warehouse` and
+`history_only`. Route B only loads and executes the policy; its executable
+`NO_FORECAST` response shape remains a follow-up contract feature.
 
 ---
 
