@@ -46,6 +46,24 @@ class InsufficientHistoryError(ModelError):
     """
 
 
+class ModelUnavailableError(Exception):
+    """This model cannot run as the policy configured it, for any series.
+
+    Deliberately *not* a `ModelError`, for the reason `ModelNotRegisteredError`
+    spells out: a `ModelError` means a model tried to forecast a series and
+    could not, while this is a configuration fault that affects every series
+    routed to that model. A window the model cannot read as an integer, or a
+    library this build does not carry, is not this series' fault, and calling it
+    MODEL_FAILED would send Pango Core looking at the data when the policy is
+    what has to change. It maps to MODEL_NOT_AVAILABLE.
+
+    An adapter raises it instead of a bare `ValueError` so that the failure
+    stays inside the one series being forecast. Anything a model lets escape
+    uncaught becomes a 500 for the whole batch, losing the series that were
+    fine, which is the opposite of what per-series errors are for.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class ModelRequest:
     """Everything a model needs to forecast one series."""

@@ -26,6 +26,7 @@ from pango_prediction.domain.types import ForecastPeriod, ForecastTotal
 from pango_prediction.ports.model import (
     InsufficientHistoryError,
     ModelRequest,
+    ModelUnavailableError,
 )
 
 
@@ -94,10 +95,10 @@ def _positive_int_param(params: Mapping[str, object], key: str, model: str) -> i
     value = params.get(key)
 
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{model} needs an integer '{key}' parameter")
+        raise ModelUnavailableError(f"{model} needs an integer '{key}' parameter")
 
     if value < 1:
-        raise ValueError(f"{model} needs '{key}' to be at least 1")
+        raise ModelUnavailableError(f"{model} needs '{key}' to be at least 1")
 
     return value
 

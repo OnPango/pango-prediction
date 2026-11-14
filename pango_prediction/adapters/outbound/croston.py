@@ -30,7 +30,11 @@ from pango_prediction.domain.intervals import (
 )
 from pango_prediction.domain.series import future_weeks
 from pango_prediction.domain.types import ForecastPeriod, ForecastTotal
-from pango_prediction.ports.model import InsufficientHistoryError, ModelRequest
+from pango_prediction.ports.model import (
+    InsufficientHistoryError,
+    ModelRequest,
+    ModelUnavailableError,
+)
 
 DEFAULT_ALPHA = 0.1
 """StatsForecast's fixed value. Route A evaluates SBA with it, untuned."""
@@ -149,9 +153,23 @@ class SbaModel:
 
 
 def _alpha_param(params: Mapping[str, object]) -> float:
+    """Read ``alpha`` from the policy, refusing what SBA cannot be fitted with.
+
+    The range is checked here and not only in `fit_sba` so that a policy value
+    is rejected as a configuration fault, with the model reported unavailable,
+    before it reaches a function whose `ValueError` guards direct callers such
+    as Route A's notebooks.
+    """
     value = params.get("alpha", DEFAULT_ALPHA)
 
     if isinstance(value, bool) or not isinstance(value, int | float):
-        raise ValueError("sba needs a numeric 'alpha' parameter")
+        raise ModelUnavailableError("sba needs a numeric 'alpha' parameter")
 
-    return float(value)
+    alpha = float(value)
+
+    if not 0 < alpha <= 1:
+        raise ModelUnavailableError(
+            "sba needs 'alpha' between 0 (excluded) and 1"
+        )
+
+    return alpha
