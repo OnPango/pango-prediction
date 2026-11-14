@@ -4,7 +4,9 @@ PANGO Prediction, the production forecasting service. Prepared for the Route A o
 
 **Last updated:** 14 November 2026 · **Contract served:** v1.1 · **Domain parameters fingerprint:** `f5f416da285217b5`
 
-Counts and tables describe `dev` at `443a979`. Section 5 keeps the questions for Route A as they stood on 9 November, with a pointer to the criteria published since.
+Counts and tables describe `dev` at `c84dd44`. Section 5 deliberately keeps
+the Route A decisions open; the Backend contract is now ready for the Core-side
+implementation.
 
 ---
 
@@ -49,14 +51,14 @@ Source: 2,361 lines of domain, 359 of application, 190 of ports, 1,583 of adapte
 | Suite | Tests |
 |---|---|
 | Domain | 218 |
-| Models and the port | 53 |
-| Application | 14 |
-| API | 34 |
+| Models and the port | 67 |
+| Application | 22 |
+| API | 37 |
 | Integration against the request fixtures | 14 |
 | Registry, config, assembly, architecture, packaging | 43 |
-| **Total** | **376** |
+| **Total** | **401** |
 
-`ruff check .` clean · `mypy --strict` clean across 57 files · architecture tests assert that no inner layer imports a web framework and that the domain imports nothing outward.
+`ruff check .` clean · `mypy --strict` clean across 58 files · architecture tests assert that no inner layer imports a web framework and that the domain imports nothing outward. The model-error isolation regression is covered at the application and HTTP levels.
 
 One gap in that coverage: no test runs the StatsForecast wrappers against the real library. Their unit tests replace it with a fake, and the CI smoke request is served by the development policy, which routes to baselines only.
 
@@ -123,13 +125,17 @@ INFO: request_id=req-... forecast_run_id=41 series_count=5 policy_version=develo
 Pango Core still needs to implement the consumer side of the contract:
 
 - build the request from movements already marked as demand-generating and daily stock observations;
+- reconstruct daily stock history by replaying movements and movement lines;
 - call `POST /v1/forecasts` with authentication and a unique `request_id`;
 - persist `ForecastRun`, successful `Forecast` rows and their `ForecastPeriod` rows;
+- persist `policy_version`, model metadata, profiles, warnings and horizon totals;
 - persist per-series errors and represent partial runs;
 - make retries idempotent using `request_id`;
 - use the forecast output to calculate alerts and reorder points.
 
-The following are intentionally outside the current integration bridge:
+The Backend request/response instructions are now maintained in
+[`contract-v1.md`](contract-v1.md). The following remain outside the current
+integration bridge:
 
 - administrator-managed closure dates;
 - DeepAR training and checkpoint serving;
@@ -257,6 +263,8 @@ Route B's covariate reads only the dates and the tenant's table, so history and 
 | StatsForecast wrappers | `adapters/outbound/statsforecast.py`, PR #8 | Route A's plan B keeps them out of policy v1 and records the dependency as a discrepancy for the two routes to settle (`docs/route-a/criteria.md`, annex B) |
 | DeepAR artifact boundary | `adapters/outbound/deepar.py` | No runtime image; not validated with a Route A checkpoint |
 | Product-to-warehouse mean allocation | `domain/allocation.py`, PR #10 | Route A's top-down arm; not called by the use case |
+| Horizon-policy validation | `application/errors.py`, API adapter and tests, merged in `c84dd44` | Requests whose horizon differs from the loaded policy are rejected |
+| Model-error isolation | `ports/model.py`, outbound adapters, application and API tests, merged in `7dbe72a` | Configuration and execution failures remain scoped to their series |
 
 ---
 
