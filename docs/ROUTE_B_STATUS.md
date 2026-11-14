@@ -2,7 +2,9 @@
 
 PANGO Prediction, the production forecasting service. Prepared for the Route A owner and for whoever tracks this project.
 
-**Last updated:** 9 November 2026 · **Contract served:** v1.1 · **Domain parameters fingerprint:** `bd4371bcce546b17`
+**Last updated:** 14 November 2026 · **Contract served:** v1.1 · **Domain parameters fingerprint:** `bd4371bcce546b17`
+
+Counts and tables describe `dev` at `443a979`. Section 5 keeps the questions for Route A as they stood on 9 November, with a pointer to the criteria published since.
 
 ---
 
@@ -24,36 +26,45 @@ What remains is the Core-side client and persistence flow, followed by replaceme
 | Availability, censoring, episodes, stock handling | `domain/availability.py` | 7.2, 7.3, S24–S26, S31 |
 | Demand profile, monthly classification, ADI/CV² | `domain/profile.py` | 7.4, 7.5, S27, E1, E5, S29 |
 | Calendar covariate (equivalent business days) | `domain/calendar.py` | 11.3, 11.4, S34 |
-| Prediction intervals from empirical residuals | `domain/intervals.py` | Route A: 0.10 / 0.90 |
+| Prediction intervals and horizon totals from empirical residuals | `domain/intervals.py` | Route A: 0.10 / 0.90 |
 | Tenant-scoped calibration and its parity hash | `domain/parameters.py` | §11 of `domain-rules.md` |
+| Policy artifact: loading, validation, per-series resolution | `domain/policy.py` | — |
+| Forecast evaluation metrics | `domain/evaluation.py` | `contract-v1.md` §19 |
+| Product-to-warehouse mean allocation, not called by the use case | `domain/allocation.py` | Route A A15 |
 | Model port | `ports/model.py` | — |
 | Model registry | `ports/registry.py` | — |
 | Baselines: `zero`, `naive`, `moving_average` | `adapters/outbound/baselines.py` | — |
+| SBA, in plain Python | `adapters/outbound/croston.py` | StatsForecast `CrostonSBA` 2.1.1 |
+| StatsForecast wrappers: `ets`, `auto_arima`, `tsb`, `adida`, `imapa`, `croston` | `adapters/outbound/statsforecast.py` | — |
+| DeepAR artifact boundary: metadata and checksum validation, injected runner | `adapters/outbound/deepar.py` | — |
 | Forecast use case | `application/forecast_service.py` | — |
-| HTTP contract v1.1, authentication, batching, logging | `adapters/inbound/api/` | `contract-v1.md` |
+| HTTP contract v1.1, authentication, batching, logging, forecast evaluations | `adapters/inbound/api/` | `contract-v1.md` |
 | CPU container | `docker/Dockerfile.api` | plan B22 |
+| CI: tests, lint, types, image build and smoke test | `.github/workflows/ci.yml` | — |
 
-Source: 1,409 lines of domain, 266 of application, 177 of ports, 624 of adapters.
+Source: 2,361 lines of domain, 359 of application, 190 of ports, 1,583 of adapters.
 
 ### Verified by
 
 | Suite | Tests |
 |---|---|
-| Domain | 141 |
-| Models and the port | 26 |
+| Domain | 218 |
+| Models and the port | 53 |
 | Application | 14 |
-| API | 31 |
+| API | 34 |
 | Integration against the request fixtures | 14 |
-| Registry, config, assembly, architecture, packaging | 42 |
-| **Total** | **276** |
+| Registry, config, assembly, architecture, packaging | 43 |
+| **Total** | **376** |
 
-`ruff check .` clean · `mypy --strict` clean across 44 files · architecture tests assert that no inner layer imports a web framework and that the domain imports nothing outward.
+`ruff check .` clean · `mypy --strict` clean across 57 files · architecture tests assert that no inner layer imports a web framework and that the domain imports nothing outward.
+
+One gap in that coverage: no test runs the StatsForecast wrappers against the real library. Their unit tests replace it with a fake, and the CI smoke request is served by the development policy, which routes to baselines only.
 
 ---
 
 ## 3. What the service answers today
 
-A successful response contains weekly periods and model metadata:
+A successful result contains weekly periods, the horizon total and model metadata. Captured from the service on the request fixture, with the first of its four periods shown; `policy_version` travels once, in the response envelope:
 
 ```json
 {
@@ -61,7 +72,6 @@ A successful response contains weekly periods and model metadata:
   "status": "ok",
   "model_name": "naive",
   "model_version": "development",
-  "policy_version": "development-1",
   "periods": [
     {
       "period_start": "2026-11-02",
@@ -69,7 +79,12 @@ A successful response contains weekly periods and model metadata:
       "lower": 0.0,
       "upper": 6.0
     }
-  ]
+  ],
+  "total": {
+    "estimate": 12.0,
+    "lower": 4.800000000000001,
+    "upper": 18.0
+  }
 }
 ```
 
@@ -96,10 +111,10 @@ Per-request log, contract §20:
 
 ```text
 INFO: request_id=req-... forecast_run_id=41 series_count=5 policy_version=development-1
-      model_name=naive model_version=development duration_ms=5.8 status=partial
+      model_name=None model_version=None duration_ms=1.3 status=partial
 ```
 
-No part of the payload is logged.
+`model_name` and `model_version` are null in this record: model identity is per series and travels in each result. No part of the payload is logged.
 
 ---
 
@@ -129,6 +144,8 @@ interpreted as the final statistical model decision.
 ## 5. Decisions Route B took that Route A has to confirm
 
 Each of these changes a number or a routing outcome, so none is cosmetic.
+
+Route A's pre-registered criteria of 13 November (`docs/route-a/criteria.md`) fix the scope of policy v1 and bear on two of them: `zero` is not a candidate in any segment (its section 2.1, relevant to 5.3), and policy v1 has no `sold_to_order` rule (its section 2.2 and DEC-9, relevant to 5.5). The questions themselves remain Route A's to close.
 
 ### 5.1 The classification window — a contradiction inside the notebook
 
@@ -191,7 +208,7 @@ Route B's covariate reads only the dates and the tenant's table, so history and 
 | Who computes public holidays | **Core sends every non-operational date.** The weight rule is shared code; the dates are data. A country code was evaluated and rejected for the forecast path: it covers public holidays and misses the company shutdown, Holy Saturday and per-warehouse differences, and it would make parity depend on both routes pinning the same package. It remains useful for drafting a new tenant's calendar at onboarding. |
 | Closures per request or per warehouse | **Both**, resolved as a union. A warehouse cannot re-open a day the tenant declared closed. |
 | Prediction intervals | Implemented. `ForecastPeriod` validates that the estimate lies inside its interval. |
-| Warehouse distribution percentages | Not done, by decision: series are `product × warehouse` and forecast bottom-up, with no allocation. |
+| Warehouse distribution percentages | Production still forecasts each `product × warehouse` series directly, with no allocation. Since 14 November `domain/allocation.py` holds Route A's top-down arm (A15), so that the 17 November run can compare the two; nothing in the use case calls it, and decision D1 stays open until that run reports. |
 | Contract drift | `contract-v1.md` reconciled to v1.1 and its response example is now **captured from the running service**. Four discrepancies closed. |
 
 ---
@@ -200,13 +217,23 @@ Route B's covariate reads only the dates and the tenant's table, so history and 
 
 | Not built | Reason |
 |---|---|
-| Policy loader | Blocked on §4 above |
+| Production policy | The loader exists; the artifact is Route A's to produce. The service runs `config/development_policy.json`, which is not a statistical decision |
 | `seasonal` flag (the fifth routing dimension) | The rule hardcodes October–December, a calibration of one Colombian catalogue. Needs a tenant-scoped quarter before it can be written at all |
-| StatsForecast adapters (`croston`, `sba`, `tsb`, `ets`, `theta`, …) | The port and the registry are ready; these are mechanical once the policy names them |
 | `seasonal_naive_block` | Needs the calendar alignment the S31 contraction removes, so it must not use the contracted series |
-| DeepAR training and runtime | Separate images by design (plan B23, B24). Training never happens inside a forecast request |
-| Dependency lock file | Declared dependencies are lower bounds, so two builds a month apart can resolve differently. Fine for development, not for production; the choice between `uv` and `pip-tools` belongs to whoever owns deployment |
-| CI | Not started |
+| DeepAR training job, runtime image, checkpoint storage and cache | Separate images by design (plan B23, B24). Training never happens inside a forecast request. The artifact boundary and a temporary development trainer exist; the rest waits for Route A's checkpoint and its metadata contract |
+| Dependency lock file | Most declared dependencies are lower bounds, so two builds a month apart can resolve differently. Fine for development, not for production. `uv` is not used, so the choice is `pip-tools` or no lock, and belongs to whoever owns deployment |
+| Deployment pipeline | CI builds and smoke-tests the image; nothing deploys it |
+
+### Built since the report of 9 November
+
+| Built | Where | Note |
+|---|---|---|
+| CI | `.github/workflows/ci.yml`, PR #6 | Tests, lint, types, image build and smoke test |
+| Policy loader | `domain/policy.py`, PR #7 | Validates the policy against the registry and the parameter fingerprint |
+| SBA and calibrated horizon totals | `adapters/outbound/croston.py`, `domain/intervals.py`, PR #8 | Route A's patch |
+| StatsForecast wrappers | `adapters/outbound/statsforecast.py`, PR #8 | Route A's plan B keeps them out of policy v1 and records the dependency as a discrepancy for the two routes to settle (`docs/route-a/criteria.md`, annex B) |
+| DeepAR artifact boundary | `adapters/outbound/deepar.py` | No runtime image; not validated with a Route A checkpoint |
+| Product-to-warehouse mean allocation | `domain/allocation.py`, PR #10 | Route A's top-down arm; not called by the use case |
 
 ---
 
@@ -235,7 +262,7 @@ docker build -f docker/Dockerfile.api -t pango-prediction:dev .
 docker run -d -p 8000:8000 -e PANGO_PREDICTION_SERVICE_TOKEN=... pango-prediction:dev
 ```
 
-235 MB. No PyTorch, no NeuralForecast, no StatsForecast, and no NumPy or pandas either — the domain needed no array library. Runs as an unprivileged user, carries a healthcheck, and **refuses to start without a service credential** rather than starting open.
+No PyTorch and no NeuralForecast. The image does install StatsForecast and NumPy, which `pyproject.toml` declares as runtime dependencies; the 235 MB reported on 9 November predates them and the image has not been measured since. The domain, application and ports layers still import no array library. Runs as an unprivileged user, carries a healthcheck, and **refuses to start without a service credential** rather than starting open.
 
 Request fixtures that match the tenant schema are in `tests/fixtures/`, with the field-to-column mapping in its `README.md`.
 
@@ -247,4 +274,6 @@ Request fixtures that match the tenant schema are in `tests/fixtures/`, with the
 |---|---|
 | `docs/domain-rules.md` | Every rule and calibrated parameter, with its notebook reference, its scope (platform rule or tenant calibration), the open decisions and 14 recorded discrepancies |
 | `docs/contract-v1.md` | The HTTP contract at v1.1, with a response captured from the service |
+| `docs/route-a/criteria.md` | Route A's pre-registered selection and acceptance criteria for policy v1 |
+| `docs/worklog/` | One entry per feature branch: reasoning, checks and open questions |
 | `AGENTS.md` | Architecture and working method |

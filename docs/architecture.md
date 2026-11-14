@@ -3,6 +3,8 @@
 **Status:** Initial architecture  
 **Forecast grain:** `product_warehouse_id`
 
+> This is the design written before the implementation. Its principles hold, but the directory layout it describes (`pango-forecast-service/`, `src/pango_forecast/`, `api/`, `models/`, `artifacts/`) is not the repository's: the code lives in `pango_prediction/` with a hexagonal layout. For the current structure read `README.md` and `AGENTS.md`. Recorded as discrepancy 1 in `docs/domain-rules.md` §14.
+
 ## 1. Goal
 
 Build a forecasting subsystem that is modular, testable, reproducible, horizontally scalable and compatible with both CPU models and GPU DeepAR.

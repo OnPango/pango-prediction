@@ -441,38 +441,46 @@ policy  = what model should handle it
 
 # Models
 
-Models live under:
+Every model implements the port in `pango_prediction/ports/model.py` and lives
+under:
 
 ```text
-src/pango_forecast/models/
+pango_prediction/adapters/outbound/
 ```
 
-Planned model registry:
+Models registered in the CPU service (`adapters/outbound/registry.py`):
 
 ```text
 zero
 naive
-moving_average_8
-seasonal_naive
-auto_ets
-croston_sba
+moving_average
+sba
+ets
+auto_arima
 tsb
 adida
 imapa
-auto_arima
-deepar
+croston
 ```
+
+`deepar` is not in the default registry. It joins only when a runtime holding a
+verified checkpoint is injected.
+
+Being registered is not being selected: which model serves which series is the
+policy's decision. Route A's policy v1 considers only `naive`,
+`moving_average` and `sba` (`docs/route-a/criteria.md`, section 2.1).
 
 ---
 
 ## Baselines
 
-Initial baseline implementations:
+Implemented in `adapters/outbound/baselines.py`, in plain Python:
 
-- Zero
-- Naive
-- Moving Average 8
-- Seasonal Naive, when enabled by the production policy
+- `zero`
+- `naive`
+- `moving_average`, whose window is a parameter the policy must state
+
+A seasonal naive baseline is not implemented.
 
 Baselines are first-class production models and must use the same model interface as more complex algorithms.
 
@@ -480,18 +488,22 @@ Baselines are first-class production models and must use the same model interfac
 
 ## Statistical Models
 
-Statistical forecasting models are implemented as wrappers around **StatsForecast**.
+`ets`, `auto_arima`, `tsb`, `adida`, `imapa` and `croston` are thin wrappers
+around **StatsForecast** 2.1.1, in `adapters/outbound/statsforecast.py`. They
+do not reimplement any algorithm, and the library is loaded on first use.
 
-The service will not manually reimplement the forecasting algorithms.
+`sba` is the exception. It is written in plain Python in
+`adapters/outbound/croston.py` and follows StatsForecast's `CrostonSBA` recipe;
+its unit tests pin it to reference values produced by StatsForecast 2.1.1.
 
-Planned models:
+Two things are still open:
 
-- AutoETS
-- CrostonSBA
-- TSB
-- ADIDA
-- IMAPA
-- AutoARIMA
+- No test runs the wrappers against the real library: the unit tests replace it
+  with a fake, and the CI smoke request is served by the development policy,
+  which routes to baselines only.
+- Whether the wrappers stay. Route A's plan B leaves them out of policy v1 and
+  records the dependency as a discrepancy for the two routes to settle
+  (`docs/route-a/criteria.md`, annex B).
 
 ---
 
@@ -518,6 +530,9 @@ Responsibilities:
 - calculate artifact SHA-256;
 - generate model metadata.
 
+The script in the repository today is a temporary development trainer, not the
+reproducible job described above. See "Temporary DeepAR development run".
+
 ### Runtime
 
 Responsibilities:
@@ -528,6 +543,11 @@ Responsibilities:
 - report inference duration;
 - report execution device;
 - report checkpoint cache hits.
+
+What exists today is the boundary, in `adapters/outbound/deepar.py`: it loads
+an artifact, verifies its metadata and SHA-256, and wraps an injected runner
+behind the model port. There is no checkpoint cache, no artifact storage and no
+GPU image yet.
 
 DeepAR models are tenant-specific unless explicitly validated otherwise.
 
@@ -594,7 +614,7 @@ FastAPI acts only as an HTTP adapter.
 
 It must not contain forecasting business logic.
 
-Initial endpoints:
+Endpoints:
 
 ```http
 GET /health
@@ -602,6 +622,10 @@ GET /health
 
 ```http
 POST /v1/forecasts
+```
+
+```http
+POST /v1/forecast-evaluations
 ```
 
 ---
@@ -638,7 +662,7 @@ Where:
 series_id = product_warehouse_id
 ```
 
-The complete contract will be documented in:
+The complete contract is documented in:
 
 ```text
 docs/contract-v1.md
@@ -664,7 +688,7 @@ Secrets must:
 
 # Repository Structure
 
-Planned repository structure:
+Current repository structure:
 
 ```text
 pango-prediction/
@@ -673,18 +697,23 @@ pango-prediction/
 │   │
 │   ├── domain/                 # Business / forecasting rules
 │   │   ├── types.py
+│   │   ├── parameters.py
 │   │   ├── series.py
 │   │   ├── availability.py
 │   │   ├── calendar.py
 │   │   ├── profile.py
-│   │   └── policy.py
+│   │   ├── policy.py
+│   │   ├── intervals.py
+│   │   ├── evaluation.py
+│   │   └── allocation.py
 │   │
 │   ├── application/            # Use cases
-│   │   └── forecast_service.py
+│   │   ├── forecast_service.py
+│   │   └── errors.py
 │   │
 │   ├── ports/                  # Interfaces
 │   │   ├── model.py
-│   │   └── artifact_store.py
+│   │   └── registry.py
 │   │
 │   ├── adapters/
 │   │   │
@@ -695,40 +724,48 @@ pango-prediction/
 │   │   │       └── errors.py
 │   │   │
 │   │   └── outbound/           # Things PANGO Prediction calls
-│   │       ├── statsforecast/
-│   │       ├── deepar/
-│   │       └── artifacts/
+│   │       ├── baselines.py
+│   │       ├── croston.py
+│   │       ├── statsforecast.py
+│   │       ├── deepar.py
+│   │       └── registry.py
 │   │
 │   ├── config.py
 │   └── main.py
 │
+├── config/
+│   └── development_policy.json
 ├── training/
 │   └── train_deepar.py
-│
 ├── docker/
-│   ├── Dockerfile.api
-│   ├── Dockerfile.deepar
-│   └── Dockerfile.train
+│   └── Dockerfile.api
 ├── docs/
 │   ├── contract-v1.md
-│   └── architecture/
+│   ├── domain-rules.md
+│   ├── architecture.md
+│   ├── route-a/
+│   └── worklog/
+├── tests/
+│   ├── unit/
+│   │   ├── domain/
+│   │   ├── models/
+│   │   └── application/
+│   ├── integration/
+│   ├── api/
+│   └── fixtures/
 ├── pyproject.toml
 └── README.md
-└── tests/
-    ├── unit/
-    │   ├── domain/
-    │   └── models/
-    │
-    ├── integration/
-    ├── api/
-    └── golden/
 ```
+
+Planned and not present yet: an artifact-store port with its storage adapter,
+`docker/Dockerfile.deepar`, `docker/Dockerfile.train` and `tests/golden/`.
 
 ---
 
 # Runtime Components
 
 The final architecture may produce three container images from this repository.
+Only `Dockerfile.api` exists today.
 
 ## Forecast API — CPU
 
@@ -903,6 +940,8 @@ Initial API scenarios:
 
 ## Golden Tests
 
+Not written yet.
+
 Golden tests validate that the exact same input produces equivalent transformed series in experimentation and production.
 
 The objective is to detect accidental differences between:
@@ -935,6 +974,11 @@ model_version
 duration
 status
 ```
+
+Today the service writes one `INFO` record per forecast request, carrying
+these fields both as `key=value` text and as `extra` attributes. No JSON
+formatter is configured. `model_name` and `model_version` are null at request
+level, because model identity is per series and travels in each result.
 
 DeepAR runtime additionally records:
 
@@ -985,53 +1029,60 @@ A message broker is not required for the initial MVP unless real operational nee
 
 # Development Roadmap
 
+Checked items were verified against the repository on 2026-11-14. A note
+follows an item that is only partly done.
+
 ## Milestone 0 — Foundation
 
-- [ ] Initialize repository
-- [ ] Configure `pyproject.toml`
-- [ ] Configure testing
-- [ ] Configure linting
-- [ ] Configure type checking
-- [ ] Create project structure
-- [ ] Define domain types
+- [x] Initialize repository
+- [x] Configure `pyproject.toml`
+- [x] Configure testing
+- [x] Configure linting
+- [x] Configure type checking
+- [x] Create project structure
+- [x] Define domain types
 
 ## Milestone 1 — Forecast Domain
 
-- [ ] Implement `series.py`
-- [ ] Implement `availability.py`
-- [ ] Implement `calendar.py`
-- [ ] Implement `profile.py`
-- [ ] Add unit tests
+- [x] Implement `series.py`
+- [x] Implement `availability.py`
+- [x] Implement `calendar.py`
+- [x] Implement `profile.py`
+- [x] Add unit tests
 - [ ] Add golden tests
 
 ## Milestone 2 — Model Engine
 
-- [ ] Define model interface
-- [ ] Implement model registry
-- [ ] Implement baselines
-- [ ] Implement StatsForecast wrappers
-- [ ] Implement policy loader
-- [ ] Implement application service
+- [x] Define model interface
+- [x] Implement model registry
+- [x] Implement baselines
+- [x] Implement StatsForecast wrappers — written and registered; not yet run
+  against the real library by any test
+- [x] Implement policy loader
+- [x] Implement application service
 
 ## Milestone 3 — HTTP API
 
-- [ ] Define contract v1
-- [ ] Implement FastAPI schemas
-- [ ] Implement `/health`
-- [ ] Implement `/v1/forecasts`
-- [ ] Implement service authentication
-- [ ] Implement partial failures
+- [x] Define contract v1
+- [x] Implement FastAPI schemas
+- [x] Implement `/health`
+- [x] Implement `/v1/forecasts`
+- [x] Implement service authentication
+- [x] Implement partial failures
 
 ## Milestone 4 — DeepAR
 
-- [ ] Implement trainer
-- [ ] Implement artifact metadata
+- [ ] Implement trainer — only a temporary development script exists
+- [x] Implement artifact metadata
 - [ ] Implement checkpoint storage
-- [ ] Implement DeepAR runtime
+- [ ] Implement DeepAR runtime — the adapter boundary exists; no runtime image,
+  and not validated with a Route A checkpoint
 - [ ] Implement checkpoint cache
 - [ ] Add GPU container images
 
 ## Milestone 5 — Pango Integration
+
+These live in Pango Core and cannot be verified from this repository.
 
 - [ ] Implement forecasting module in Pango Core
 - [ ] Create forecast runs
@@ -1040,11 +1091,12 @@ A message broker is not required for the initial MVP unless real operational nee
 
 ## Milestone 6 — Production Readiness
 
-- [ ] Structured logging
-- [ ] Integration tests
-- [ ] API tests
-- [ ] CI/CD
-- [ ] Docker builds
+- [ ] Structured logging — a per-request record exists; it is not JSON
+- [x] Integration tests
+- [x] API tests
+- [x] CI
+- [ ] CD
+- [x] Docker builds — the CPU API image, built and smoke-tested in CI
 - [ ] Deployment
 - [ ] Runtime monitoring
 

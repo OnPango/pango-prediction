@@ -4,8 +4,10 @@ version = "0.1.0"
 description = "Prediction service for PANGO"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    # Used by the inbound HTTP adapter only. The domain and application layers
-    # must stay importable without these installed.
+    # fastapi, pydantic and uvicorn are used by the inbound HTTP adapter only;
+    # numpy and statsforecast by the outbound StatsForecast adapter only. The
+    # domain, application and ports layers must stay importable without any of
+    # them installed.
     "fastapi>=0.115",
     "numpy>=2.0",
     "pydantic>=2.9",
