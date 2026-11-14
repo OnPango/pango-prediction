@@ -111,7 +111,7 @@ Example response:
 ```json
 {
   "status": "ok",
-  "service": "pango-forecast-service",
+  "service": "pango-prediction",
   "service_version": "0.1.0"
 }
 ```

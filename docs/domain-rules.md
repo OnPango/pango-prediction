@@ -518,7 +518,7 @@ Scope is from §11: a platform rule holds for every tenant, a calibration does n
 | Max stockout episode | 13 weeks | S26 | tenant | `DomainParameters.max_stockout_episode_weeks` |
 | Made-to-order threshold | 0.5 | S24 | tenant | `DomainParameters.made_to_order_threshold` |
 | Min weeks with stock data | 4 | S24 | tenant | `DomainParameters.min_weeks_with_stock_data` |
-| Horizon | 4 weeks | 8.2 | tenant | the policy's `horizon_weeks` |
+| Horizon | 4 weeks | 8.2 | tenant | the policy's `horizon` |
 | Inactivity window | 26 weeks | S29 | tenant | `DomainParameters.inactivity_weeks` |
 | New product | ≤ 13 weeks | E5 | tenant | `DomainParameters.new_history_max_weeks` |
 | Limited history | 14–52 weeks | E5 | tenant | `DomainParameters.limited_history_max_weeks` |
@@ -529,7 +529,7 @@ Scope is from §11: a platform rule holds for every tenant, a calibration does n
 | Year-start closure | 30 Dec - 6 Jan | S34 | tenant **data** | arrives as `closed_dates`; see §7 |
 | Public holidays | per tenant and warehouse | S34 | tenant **data** | arrives as `closed_dates`; see §7 |
 | Seasonal rescue | 2+ years and 50 %+ in Oct-Dec | 7.5 C | tenant | not yet, and needs a tenant-scoped quarter |
-| Interval quantiles | 0.10 / 0.90 | Route A | tenant | the policy's `interval` |
+| Interval quantiles | 0.10 / 0.90 | Route A | tenant | `DEFAULT_QUANTILES` in `domain/intervals.py`; not yet a policy field |
 | Evaluation blocks | 13 (1–7 selection, 8–13 report) | 13.2 | tenant | Route A only |
 | Likelihood | NegativeBinomial | S18 | tenant | Route A only |
 
@@ -562,8 +562,8 @@ Listed rather than silently fixed, per the source-of-truth rule in `AGENTS.md`.
 
 | # | Discrepancy | Assessment |
 |---|---|---|
-| 1 | `architecture.md` §7 and the two-route plan describe `pango-forecast-service/` with `src/pango_forecast/` and `api/`, `models/`, `artifacts/`. The repository is `pango-prediction/` with a hexagonal layout. | Stale documentation. The live repository is authoritative. |
-| 2 | `README.md` shows the hexagonal layout in "Repository Structure" but `src/pango_forecast/models/` under "Models". | Internally inconsistent README. |
+| 1 | `architecture.md` §7 and the two-route plan describe `pango-forecast-service/` with `src/pango_forecast/` and `api/`, `models/`, `artifacts/`. The repository is `pango-prediction/` with a hexagonal layout. | Stale documentation. The live repository is authoritative. Since 14 November `architecture.md` opens with a note saying so; its body is unchanged. |
+| 2 | `README.md` shows the hexagonal layout in "Repository Structure" but `src/pango_forecast/models/` under "Models". | **Resolved** on 14 November. Both sections now describe the live repository, and the roadmap marks what is built. |
 | 3 | `README.md` development setup says `uv sync`, `uv run pytest`, `uv run mypy src`. `uv` is not installed and `src/` does not exist. | Resolved: `uv` is not used. `README.md` and `AGENTS.md` share one `pip` and virtual-environment setup and the same checks. |
 | 4 | `contract-v1.md` §11 lists four availability states including `SIN_SURTIDO`; `AGENTS.md` and `PREDICTION_CONTEXT.md` list three. | Resolved: four states, see §6. Identifier anglicised to `OUT_OF_ASSORTMENT`. |
 | 5 | `contract-v1.md` §8 carried `metadata.made_to_order`. No such column exists, and the notebook derives it. | **Resolved.** Removed from the contract in 1.1, and the service rejects the field rather than ignoring it. |
@@ -576,6 +576,8 @@ Listed rather than silently fixed, per the source-of-truth rule in `AGENTS.md`.
 | 12 | The notebook's agreed parameters (13.2) declare `ventana_cuadrante_meses: 24`, but the cell that computes the quadrant (7.4) does not truncate: it runs from each series' first month of sale to the last complete month, up to 44 months for this dataset. | **Consequential and unresolved.** The two give different ADI and CV², so different classes and different models. Route B reproduces what was executed, since that is what produced the classes Route A evaluated, and exposes the window as a parameter defaulting to `None`. Route A must confirm. |
 | 13 | `contract-v1.md` §14's profile block had `observed_periods`, `nonzero_periods` and `short_history`, conflating the monthly classification grain with the weekly forecast grain and reducing three history classes to a boolean. | **Resolved.** 1.1 returns the implemented `DemandProfile`, with the two grains counted separately. |
 | 14 | `contract-v1.md` showed string identifiers and `frequency: "weekly"`; the tenant schema has integers and `WEEKLY`. | **Resolved** in 1.1. |
+| 15 | `contract-v1.md` §3 and §8 say that sending `metadata.made_to_order` fails validation. It does not: `metadata` is free-form, so the key is accepted there and never read. Only `made_to_order` at series level is refused, as an unknown field. Checked on 14 November by posting the minimal fixture with the key inside `metadata`: `200`. | **Unresolved.** Either the schema refuses the key inside `metadata`, or the contract says it is ignored. Row 5 above holds only for the series-level field. |
+| 16 | `contract-v1.md` §7 gives the supported `frequency` as `weekly`, while its own corrections in §3 and the schema say `WEEKLY`. | Stale line in the contract. Left for the branch that next edits §7. |
 
 ---
 
