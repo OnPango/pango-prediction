@@ -12,6 +12,9 @@ The policy and model registry are injected so this use case can execute the
 same domain pipeline with a development policy today and Route A's evaluated
 policy later.
 
+A series has one of three outcomes: a forecast, a decision by the policy not
+to forecast it, or a failure. The second is not an error and is reported apart.
+
 One series failing never fails the batch (plan B17). The one thing that does
 refuse a whole command is a horizon the policy was not calibrated for, which
 is a fault of the request and not of any series.
@@ -40,6 +43,7 @@ from pango_prediction.domain.types import (
     ForecastPeriod,
     ForecastSeriesInput,
     ForecastTotal,
+    NoForecastReason,
     StockHandling,
 )
 from pango_prediction.ports.model import (
@@ -84,11 +88,20 @@ class SeriesError:
 
 @dataclass(frozen=True, slots=True)
 class SeriesOutcome:
-    """What happened to one series. ``error`` is None when it succeeded."""
+    """What happened to one series: a forecast, a decision not to, or a failure.
+
+    Exactly one of the three holds. ``no_forecast`` is the policy declining the
+    series on purpose, with its reason; ``error`` is something going wrong.
+    They are kept apart here whatever the caller is able to understand, and
+    rendering a declined series for a client that only knows two statuses is
+    the inbound adapter's concern, not this one's.
+    """
 
     series_id: str
     warnings: tuple[str, ...] = ()
     error: SeriesError | None = None
+    no_forecast: NoForecastReason | None = None
+    """Why the policy declined the series. None when it did not."""
     profile: DemandProfile | None = None
     """What the series' demand behaves like. None only when it never got that
     far, so a profile and an error can and do travel together."""
@@ -99,9 +112,14 @@ class SeriesOutcome:
     model_name: str | None = None
     model_version: str | None = None
 
+    def __post_init__(self) -> None:
+        if self.error is not None and self.no_forecast is not None:
+            raise ValueError("a series is either declined or failed, not both")
+
     @property
     def ok(self) -> bool:
-        return self.error is None
+        """Whether the series was forecast."""
+        return self.error is None and self.no_forecast is None
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,8 +132,12 @@ class ForecastResultBatch:
         return sum(1 for outcome in self.outcomes if outcome.ok)
 
     @property
+    def no_forecast_count(self) -> int:
+        return sum(1 for outcome in self.outcomes if outcome.no_forecast is not None)
+
+    @property
     def error_count(self) -> int:
-        return len(self.outcomes) - self.ok_count
+        return sum(1 for outcome in self.outcomes if outcome.error is not None)
 
 
 class ForecastService:
@@ -235,7 +257,22 @@ class ForecastService:
                 ),
             )
 
+        if decision.model is None and decision.reason is not None:
+            # The policy declined the series on purpose. That is an outcome of
+            # its own: nothing failed, and the profile and warnings are the
+            # whole of what there is to say.
+            return SeriesOutcome(
+                series_id=series.series_id,
+                warnings=self._warnings(profile),
+                profile=profile,
+                horizon_business_days=horizon_business_days,
+                no_forecast=decision.reason,
+            )
+
         if decision.model is None:
+            # No model and no reason: the policy has nothing for this series
+            # and does not say why, so it stays a missing model. This is the
+            # path history insufficiency travels until a rule gives it a reason.
             return SeriesOutcome(
                 series_id=series.series_id,
                 warnings=self._warnings(profile),
@@ -243,7 +280,7 @@ class ForecastService:
                 horizon_business_days=horizon_business_days,
                 error=SeriesError(
                     code=SeriesErrorCode.MODEL_NOT_AVAILABLE,
-                    message=decision.reason or "The policy selected no model.",
+                    message="The policy selected no model.",
                 ),
             )
 
@@ -300,11 +337,9 @@ class ForecastService:
     def _warnings(profile: DemandProfile) -> tuple[str, ...]:
         """What Pango Core should know about this series before a model exists.
 
-        Warnings rather than a status of their own. Route A's reply sketches a
-        third outcome, NO_FORECAST with a reason, and section 9 of the domain
-        rules shows three quarters of the catalogue falling into it. Inventing
-        that status here would be guessing at a decision the policy format has
-        not made yet, so these travel as text until it does.
+        Explanations in words, alongside whichever outcome the series has. A
+        declined series also carries its reason from the closed vocabulary;
+        these say what the profile shows, which is more than one code can.
         """
         warnings: list[str] = []
 
