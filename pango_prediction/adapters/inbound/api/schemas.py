@@ -64,8 +64,11 @@ class SeriesRequest(_Schema):
 
 
 class ForecastRequest(_Schema):
-    contract_version: Literal["1.0", "1.1"] = Field(
-        description="1.0 is still accepted: the 1.1 additions are additive"
+    contract_version: Literal["1.0", "1.1", "1.2"] = Field(
+        description=(
+            "Decides the envelope returned: 1.2 adds the no_forecast status, "
+            "while 1.0 and 1.1 are answered with the 1.1 envelope"
+        )
     )
     request_id: str = Field(min_length=1)
     forecast_run_id: int = Field(description="forecast_runs.id")
@@ -121,7 +124,7 @@ class EvaluationSeriesRequest(_Schema):
 
 
 class ForecastEvaluationRequest(_Schema):
-    contract_version: Literal["1.0", "1.1"]
+    contract_version: Literal["1.0", "1.1", "1.2"]
     request_id: str = Field(min_length=1)
     forecast_run_id: int
     frequency: Literal["WEEKLY"]
@@ -189,7 +192,13 @@ class ProfileResponse(_Schema):
 
 class SeriesResultResponse(_Schema):
     series_id: int
-    status: Literal["ok", "error"]
+    status: Literal["ok", "error", "no_forecast"] = Field(
+        description="no_forecast is only ever sent to a client that declares 1.2"
+    )
+    reason: str | None = Field(
+        default=None,
+        description="Why the policy declined the series; set with no_forecast",
+    )
     periods: list[PeriodResponse] = Field(default_factory=list)
     total: TotalResponse | None = None
     model_name: str | None = None
@@ -207,6 +216,7 @@ class SummaryResponse(_Schema):
     total: int
     ok: int
     error: int
+    no_forecast: int = 0
 
 
 class ForecastResponse(_Schema):

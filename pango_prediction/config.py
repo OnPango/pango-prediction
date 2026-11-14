@@ -14,13 +14,24 @@ from dataclasses import dataclass
 
 SERVICE_NAME = "pango-prediction"
 SERVICE_VERSION = "0.1.0"
-CONTRACT_VERSION = "1.1"
-"""The envelope this service serves.
+CONTRACT_VERSION = "1.2"
+"""The newest envelope this service serves.
 
-Bumped from 1.0 for the demand profile and the business-day covariate in
-the response. Both are additive, which section 3 of `docs/contract-v1.md`
-keeps inside 1.x, so a 1.0 request is still accepted and served this
-envelope; a client that ignores fields it does not know is unaffected.
+1.1 added the demand profile and the business-day covariate to the response.
+Both are additive, which section 3 of `docs/contract-v1.md` keeps inside 1.x,
+so a client that ignores fields it does not know is unaffected.
+
+1.2 adds the `no_forecast` status, and a status is not additive: a client that
+knows `ok` and `error` may branch on exactly those two. The envelope a client
+receives therefore follows the version it declares, and this one goes only to
+a client that declares 1.2.
+"""
+
+LEGACY_CONTRACT_VERSION = "1.1"
+"""The envelope served to a client that declares 1.0 or 1.1.
+
+Such a client is told about a declined series the way it was before 1.2
+existed: as the error it already handles.
 """
 
 SERVICE_TOKEN_ENV = "PANGO_PREDICTION_SERVICE_TOKEN"

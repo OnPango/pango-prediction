@@ -13,7 +13,8 @@ touching the environment.
 import logging
 import secrets
 import time
-from typing import Annotated
+from collections import Counter
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 
@@ -38,7 +39,10 @@ from pango_prediction.adapters.inbound.api.schemas import (
     SummaryResponse,
     TotalResponse,
 )
-from pango_prediction.application.errors import HorizonMismatchError
+from pango_prediction.application.errors import (
+    HorizonMismatchError,
+    SeriesErrorCode,
+)
 from pango_prediction.application.forecast_service import (
     ForecastCommand,
     ForecastService,
@@ -46,6 +50,7 @@ from pango_prediction.application.forecast_service import (
 )
 from pango_prediction.config import (
     CONTRACT_VERSION,
+    LEGACY_CONTRACT_VERSION,
     SERVICE_NAME,
     SERVICE_VERSION,
     Settings,
@@ -157,13 +162,68 @@ def to_profile(profile: DemandProfile) -> ProfileResponse:
     )
 
 
+LEGACY_REQUEST_VERSIONS = frozenset({"1.0", "1.1"})
+"""Versions written before the `no_forecast` status existed."""
+
+
+def served_contract_version(declared: str) -> str:
+    """The envelope a client receives, decided by the version it declared.
+
+    Until 1.2 every change was an added field, so one envelope served everyone.
+    A new status is different: a client that knows `ok` and `error` may branch
+    on exactly those two. So a client that declares 1.0 or 1.1 is answered in
+    1.1, and only one that declares 1.2 or later is told about `no_forecast`.
+    """
+    if declared in LEGACY_REQUEST_VERSIONS:
+        return LEGACY_CONTRACT_VERSION
+
+    return CONTRACT_VERSION
+
+
 def to_series_result(
     series_id: int,
     outcome: SeriesOutcome,
+    *,
+    knows_no_forecast: bool,
 ) -> SeriesResultResponse:
+    """Render one outcome in the envelope the client understands.
+
+    The use case always says when the policy declined a series. A client that
+    predates that status is told what it was told before it existed: an error
+    with the stable code MODEL_NOT_AVAILABLE, naming the reason in its message.
+    Translating between contract versions belongs here, at the edge, so that
+    the application never has to know which client it is talking to.
+    """
+    error = (
+        None
+        if outcome.error is None
+        else SeriesErrorResponse(
+            code=outcome.error.code.value,
+            message=outcome.error.message,
+        )
+    )
+    reason = None if outcome.no_forecast is None else outcome.no_forecast.value
+
+    if reason is not None and not knows_no_forecast:
+        error = SeriesErrorResponse(
+            code=SeriesErrorCode.MODEL_NOT_AVAILABLE.value,
+            message=f"The policy does not forecast this series: {reason}.",
+        )
+        reason = None
+
+    status: Literal["ok", "error", "no_forecast"]
+
+    if error is not None:
+        status = "error"
+    elif reason is not None:
+        status = "no_forecast"
+    else:
+        status = "ok"
+
     return SeriesResultResponse(
         series_id=series_id,
-        status="ok" if outcome.ok else "error",
+        status=status,
+        reason=reason,
         periods=[
             PeriodResponse(
                 period_start=period.period_start,
@@ -187,14 +247,7 @@ def to_series_result(
         warnings=list(outcome.warnings),
         profile=(None if outcome.profile is None else to_profile(outcome.profile)),
         horizon_business_days=list(outcome.horizon_business_days),
-        error=(
-            None
-            if outcome.error is None
-            else SeriesErrorResponse(
-                code=outcome.error.code.value,
-                message=outcome.error.message,
-            )
-        ),
+        error=error,
     )
 
 
@@ -262,14 +315,26 @@ def build_router(settings: Settings, service: ForecastService) -> APIRouter:
 
         duration_ms = (time.perf_counter() - started) * 1000
 
+        contract_version = served_contract_version(request.contract_version)
+
         results = [
-            to_series_result(series.series_id, outcome)
+            to_series_result(
+                series.series_id,
+                outcome,
+                knows_no_forecast=contract_version != LEGACY_CONTRACT_VERSION,
+            )
             for series, outcome in zip(request.series, batch.outcomes, strict=True)
         ]
 
-        if batch.error_count == 0:
+        # Counted from what was rendered, not from the batch, so the summary
+        # and the log describe the response this client actually received: a
+        # declined series is a `no_forecast` for one client and an `error` for
+        # another.
+        counts = Counter(result.status for result in results)
+
+        if counts["error"] == 0:
             status = "ok"
-        elif batch.ok_count == 0:
+        elif counts["error"] == len(results):
             status = "error"
         else:
             status = "partial"
@@ -302,15 +367,16 @@ def build_router(settings: Settings, service: ForecastService) -> APIRouter:
         )
 
         return ForecastResponse(
-            contract_version=CONTRACT_VERSION,
+            contract_version=contract_version,
             service_version=SERVICE_VERSION,
             policy_version=batch.policy_version,
             request_id=request.request_id,
             forecast_run_id=request.forecast_run_id,
             summary=SummaryResponse(
                 total=len(results),
-                ok=batch.ok_count,
-                error=batch.error_count,
+                ok=counts["ok"],
+                error=counts["error"],
+                no_forecast=counts["no_forecast"],
             ),
             results=results,
         )
@@ -417,7 +483,7 @@ def build_router(settings: Settings, service: ForecastService) -> APIRouter:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
         return ForecastEvaluationResponse(
-            contract_version=CONTRACT_VERSION,
+            contract_version=served_contract_version(request.contract_version),
             service_version=SERVICE_VERSION,
             request_id=request.request_id,
             forecast_run_id=request.forecast_run_id,
