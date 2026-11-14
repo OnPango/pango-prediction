@@ -29,3 +29,15 @@ def batch_too_large(count: int, limit: int) -> HTTPException:
             f"{limit}. Split the job into several calls."
         ),
     )
+
+
+def horizon_mismatch(message: str) -> HTTPException:
+    """A horizon other than the one the loaded policy is calibrated for.
+
+    The application decides that this is a fault and words it; this only
+    chooses the status code.
+    """
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=message,
+    )

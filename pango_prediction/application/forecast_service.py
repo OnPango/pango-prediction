@@ -12,14 +12,19 @@ The policy and model registry are injected so this use case can execute the
 same domain pipeline with a development policy today and Route A's evaluated
 policy later.
 
-One series failing never fails the batch (plan B17).
+One series failing never fails the batch (plan B17). The one thing that does
+refuse a whole command is a horizon the policy was not calibrated for, which
+is a fault of the request and not of any series.
 """
 
 from dataclasses import dataclass, field
 from datetime import date
 from typing import cast
 
-from pango_prediction.application.errors import SeriesErrorCode
+from pango_prediction.application.errors import (
+    HorizonMismatchError,
+    SeriesErrorCode,
+)
 from pango_prediction.domain.availability import build_weekly_availability
 from pango_prediction.domain.calendar import ClosedDates, weekly_business_days
 from pango_prediction.domain.parameters import (
@@ -125,6 +130,20 @@ class ForecastService:
         self._registry = registry or ModelRegistry()
 
     def run(self, command: ForecastCommand) -> ForecastResultBatch:
+        """Forecast every series of the command.
+
+        Raises `HorizonMismatchError` before touching any series when the
+        command's horizon is not the one the loaded policy declares. Without a
+        policy there is nothing to disagree with: no model runs, and each
+        series reports MODEL_NOT_AVAILABLE on its own.
+        """
+        if self._policy is not None and command.horizon != self._policy.horizon:
+            raise HorizonMismatchError(
+                requested=command.horizon,
+                expected=self._policy.horizon,
+                policy_version=self._policy.policy_version,
+            )
+
         return ForecastResultBatch(
             outcomes=tuple(
                 self._run_one(series, command) for series in command.series

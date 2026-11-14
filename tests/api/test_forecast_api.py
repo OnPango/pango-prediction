@@ -55,6 +55,25 @@ def test_health_needs_no_credential(client: TestClient) -> None:
     }
 
 
+# --- the horizon belongs to the policy ---
+
+
+@pytest.mark.parametrize("horizon", [1, 8])
+def test_a_horizon_other_than_the_policys_is_a_bad_request(
+    client: TestClient, horizon: int
+) -> None:
+    """Refused whole, not per series: the fault is in the request itself."""
+    payload = load_fixture()
+    payload["horizon"] = horizon
+
+    response = client.post("/v1/forecasts", json=payload, headers=AUTH)
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert str(horizon) in detail
+    assert "4" in detail
+
+
 # --- service-to-service authentication (plan B16) ---
 
 

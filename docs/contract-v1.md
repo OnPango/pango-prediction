@@ -178,7 +178,7 @@ Content-Type: application/json
 - `request_id`: required unique tracing identifier.
 - `forecast_run_id`: required Pango Core run identifier; opaque to Forecast Service.
 - `frequency`: required; current supported value `weekly`.
-- `horizon`: required; current production value `4`.
+- `horizon`: required; current production value `4`. It must equal the horizon declared by the loaded model policy: intervals and totals are calibrated for that horizon, so any other value is refused with `400` for the whole request (section 17).
 - `history_end`: required, format `YYYY-MM-DD`.
 - `calendar.closed_dates`: optional array of non-operational dates.
 - `series`: required array of product-warehouse series.
@@ -554,7 +554,7 @@ UNSUPPORTED_DATA
 ## 17. HTTP status codes
 
 - `200 OK`: request processed; may contain partial series failures.
-- `400 Bad Request`: malformed request.
+- `400 Bad Request`: malformed request; also a batch over the series limit, and a `horizon` other than the one the loaded policy is calibrated for.
 - `401 Unauthorized`: invalid or missing service credential.
 - `403 Forbidden`: credential valid but unauthorized.
 - `422 Unprocessable Entity`: semantically invalid request.
