@@ -5,15 +5,19 @@
 # (B23, B24), so putting a GPU stack in here would multiply the image size of
 # the service that answers every request for a model it never runs.
 #
-# StatsForecast is not here either, despite the plan listing it. Nothing
-# imports it yet - the baselines are pure Python behind the model port - so it
-# joins this image together with the adapters that need it, not before.
+# StatsForecast and NumPy are here. `pyproject.toml` declares them as runtime
+# dependencies and the registry ships the StatsForecast adapters, so the
+# install below brings them in; the baselines and SBA remain pure Python.
+# Whether they stay is open: Route A's plan B keeps the StatsForecast models
+# out of policy v1 and records the dependency as a discrepancy for the two
+# routes to settle (docs/route-a/criteria.md, annex B). Dropping it means
+# removing the adapters and the dependency together, not editing this comment.
 #
-# Known limitation: the declared dependencies are lower bounds
+# Known limitation: most declared dependencies are lower bounds
 # (`fastapi>=0.115`), so two builds a month apart can resolve differently.
 # That is fine for development and not fine for production; the fix is a lock
-# file, which is a choice between `uv` and `pip-tools` and belongs to whoever
-# owns deployment.
+# file. `uv` is not used in this project, so that means `pip-tools` or no lock
+# at all, and the choice belongs to whoever owns deployment.
 
 FROM python:3.12-slim
 
