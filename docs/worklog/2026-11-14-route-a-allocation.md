@@ -1,6 +1,6 @@
 # Product-to-warehouse mean allocation (A15)
 
-**Date:** 2026-11-13 · **Branch:** `feature/route-a-allocation` → `dev` (from `4a2c8d0`)
+**Date:** 2026-11-14 · **Branch:** `feature/route-a-allocation` → `dev` (from `4a2c8d0`)
 
 ## Goal
 The top-down arm of T4 (Route A decision D1): forecast the product as a whole and split its mean across its warehouses. The single reporting run of 17-Nov compares it against forecasting each warehouse on its own, and that comparison is only valid if the allocation it evaluates is the code that ships. A15 fixes the minimal scope: shares and the mean, no per-warehouse intervals, no connection to `application`.
@@ -8,8 +8,9 @@ The top-down arm of T4 (Route A decision D1): forecast the product as a whole an
 ## Commits
 | Commit | Files | What and why |
 |---|---|---|
-| `8442fef` | `domain/allocation.py`, `tests/unit/domain/test_allocation.py` | Exposure, prior, shares and the split of the mean, as pure standard-library functions |
-| Add worklog for Route A allocation | this file | — |
+| `f8b1643` | `domain/allocation.py`, `tests/unit/domain/test_allocation.py` | Exposure, prior, shares and the split of the mean, as pure standard-library functions |
+| `ef244c0` | `docs/worklog/2026-11-14-route-a-allocation.md` | This entry, as Route A sent it |
+| Correct the worklog commit hash and date | this file | The hashes of the sent patches change when `git am` replays them, and the entry is dated the day its PR opens |
 
 The module, step by step (Route A specification "Desagregación producto → bodega", steps 1–4):
 
