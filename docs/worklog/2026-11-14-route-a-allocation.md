@@ -43,7 +43,7 @@ The reference check runs in Route A's workspace on the real ledger and is not pa
 
 ## Open questions
 - Who supplies `first_movement` in production (Core or the World Office adapter): open, after 20-Nov.
-- `active_warehouses` and `stock_warehouses` are inputs. In evaluation they come from Route A's data (warehouses with a 2026 movement up to the cutoff; S15); in production they need the contract fields `allocatable` and `holds_stock`.
+- `active_warehouses` and `stock_warehouses` are inputs. In evaluation they come from Route A's data (warehouses with a 2026 movement up to the cutoff; S15). In production, warehouse configuration is administrator-managed: `holds_stock` belongs to the warehouse block and `history_only` is carried on each series.
 - Per-warehouse intervals (simulated paths) remain out of scope (A15).
 
 ## Next step

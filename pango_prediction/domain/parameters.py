@@ -93,17 +93,12 @@ class DomainParameters:
     stored, so the two can never disagree.
     """
 
-    classification_window_months: int | None = None
-    """Months of monthly history used to classify, or None for all of it.
+    classification_window_months: int = 24
+    """Months of monthly history used to classify the demand profile.
 
-    None is not an oversight, it is what was evaluated. The notebook's agreed
-    parameter block (13.2) declares ``ventana_cuadrante_meses: 24``, but the
-    cell that actually computes the quadrant (7.4) truncates nothing: it runs
-    from each series' first month of sale to the last complete month, which for
-    this dataset is 44 months rather than 24. Every downstream decision was
-    made from classes computed over the whole history, so that is the default
-    here. Setting this to 24 is a one-line change once Route A says which of
-    the two it meant; see `docs/domain-rules.md` section 14.
+    Route A confirmed the 24-month calibration from S30 and A5. The window is
+    recomputed at every cutoff and is part of the policy's parameter
+    fingerprint.
     """
 
     def __post_init__(self) -> None:
@@ -153,8 +148,7 @@ class DomainParameters:
             and self.classification_window_months < 1
         ):
             raise ValueError(
-                "classification_window_months must be at least 1, or None for "
-                "the whole history"
+                "classification_window_months must be at least 1"
             )
 
     def fingerprint(self) -> str:
