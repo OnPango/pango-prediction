@@ -595,7 +595,7 @@ python -m training.train_deepar `
   --input .\tmp\deepar_train.csv `
   --output .\tmp\deepar-equipmaster-v1 `
   --model-ref deepar-equipmaster-v1 `
-  --params-version bd4371bcce546b17 `
+  --params-version f5f416da285217b5 `
   --max-steps 20
 ```
 

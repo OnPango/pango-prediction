@@ -2,7 +2,7 @@
 
 PANGO Prediction, the production forecasting service. Prepared for the Route A owner and for whoever tracks this project.
 
-**Last updated:** 14 November 2026 · **Contract served:** v1.1 · **Domain parameters fingerprint:** `bd4371bcce546b17`
+**Last updated:** 14 November 2026 · **Contract served:** v1.1 · **Domain parameters fingerprint:** `f5f416da285217b5`
 
 Counts and tables describe `dev` at `443a979`. Section 5 keeps the questions for Route A as they stood on 9 November, with a pointer to the criteria published since.
 
@@ -147,13 +147,11 @@ Each of these changes a number or a routing outcome, so none is cosmetic.
 
 Route A's pre-registered criteria of 13 November (`docs/route-a/criteria.md`) fix the scope of policy v1 and bear on two of them: `zero` is not a candidate in any segment (its section 2.1, relevant to 5.3), and policy v1 has no `sold_to_order` rule (its section 2.2 and DEC-9, relevant to 5.5). The questions themselves remain Route A's to close.
 
-### 5.1 The classification window — a contradiction inside the notebook
+### 5.1 The classification window — resolved
 
-The agreed parameter block (cell 13.2) declares `ventana_cuadrante_meses: 24`. The cell that actually computes the quadrant (7.4) truncates nothing: it builds `period_range(first_month_of_sale, ULT_MES)`, which over data running from January 2023 to August 2026 is up to **44 months**, not 24.
-
-The two give different ADI and CV², therefore different classes and different models.
-
-**Route B reproduces what was executed**, because those are the classes every downstream decision was made from. The window exists as `DomainParameters.classification_window_months`, defaulting to `None`. Switching it to 24 is a one-line change. **Which did you mean?**
+Route A confirmed 24 months (S30, A5). Route B now uses
+`classification_window_months=24`; the resulting parameter fingerprint is
+`f5f416da285217b5`.
 
 ### 5.2 The fingerprint recipe
 
@@ -164,7 +162,9 @@ the DomainParameters fields as JSON, keys sorted, no whitespace
   -> SHA-256 -> first 16 hex characters
 ```
 
-For the current defaults: **`bd4371bcce546b17`**. If Route A hashes differently the two values will never match and the audit is worthless. This needs agreeing, not assuming.
+For the current defaults: **`f5f416da285217b5`**. Route A confirmed that the
+fingerprint comes from `DomainParameters.fingerprint()` and is frozen with the
+tag.
 
 ### 5.3 `zero` is not in the model enum
 
@@ -191,13 +191,18 @@ Route A's reply sketches a third outcome with a reason (`non_stock_warehouse`). 
 
 ### 5.7 How does the service learn a warehouse holds stock?
 
-S15 says stock is measured only in the main warehouses, and that is **derived** in the notebook. The tenant schema's `warehouse_type` does not carry it. Without an answer, the service cannot tell a genuine stockout from a warehouse that never holds stock.
+Resolved: `holds_stock` is administrator-managed configuration per warehouse,
+not inferred by Core. EquipMaster is seeded privately from S15; the private
+warehouse identifiers must not enter this repository. The HTTP contract still
+needs the executable `warehouses[]` block and the corresponding no-forecast
+handling before this becomes a production behavior.
 
 ### 5.8 Export the learned year-end closure
 
 The notebook derives `cierre` from history: business days with no sales between 26 December and 10 January, over 2022–2025. That cannot be evaluated for a future year, so `x in cierre` is false for every horizon week — **the notebook's future year-ends score a full week while its historical ones score nearly nothing**, a skew in a variable DeepAR consumes as known.
 
-Route B's covariate reads only the dates and the tenant's table, so history and horizon use one rule. Matching the notebook on history requires Core to be seeded with the dates `cierre` contained, so **that learned set should be exported** rather than re-derived.
+Route B's covariate reads only the dates and the tenant's table, so history and horizon use one rule. Core should seed EquipMaster with the 151-date calendar attachment, including 2027. The verified SHA-256 is
+`b3df11b6861a95a6d0803d065dc034d80512f2d7ccaa2291a34f1a52b7119c14`.
 
 ---
 
@@ -210,6 +215,8 @@ Route B's covariate reads only the dates and the tenant's table, so history and 
 | Prediction intervals | Implemented. `ForecastPeriod` validates that the estimate lies inside its interval. |
 | Warehouse distribution percentages | Production still forecasts each `product × warehouse` series directly, with no allocation. Since 14 November `domain/allocation.py` holds Route A's top-down arm (A15), so that the 17 November run can compare the two; nothing in the use case calls it, and decision D1 stays open until that run reports. |
 | Contract drift | `contract-v1.md` reconciled to v1.1 and its response example is now **captured from the running service**. Four discrepancies closed. |
+| Route A classification freeze | `DomainParameters`, policy fixture and docs | 24-month window confirmed; fingerprint is `f5f416da285217b5` |
+| EquipMaster calendar seed | External attachment, not repository data | 151 dates verified; Core must seed the tenant calendar |
 
 ---
 
@@ -217,7 +224,7 @@ Route B's covariate reads only the dates and the tenant's table, so history and 
 
 | Not built | Reason |
 |---|---|
-| Production policy | The loader exists; the artifact is Route A's to produce. The service runs `config/development_policy.json`, which is not a statistical decision |
+| Production policy | The loader exists; the artifact is Route A's to produce. The service still runs `config/development_policy.json`, which is not a statistical decision |
 | `seasonal` flag (the fifth routing dimension) | The rule hardcodes October–December, a calibration of one Colombian catalogue. Needs a tenant-scoped quarter before it can be written at all |
 | `seasonal_naive_block` | Needs the calendar alignment the S31 contraction removes, so it must not use the contracted series |
 | DeepAR training job, runtime image, checkpoint storage and cache | Separate images by design (plan B23, B24). Training never happens inside a forecast request. The artifact boundary and a temporary development trainer exist; the rest waits for Route A's checkpoint and its metadata contract |

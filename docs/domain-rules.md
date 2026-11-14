@@ -338,9 +338,8 @@ At weekly grain almost nothing looks like stable demand. Aggregated monthly, hal
 
 A month counts as unobservable when half or more of its days fall in a stockout; 4.4 % of months.
 
-Classification window: **the whole history from each series' first month of sale**, recomputed at every cutoff.
-
-This corrects an earlier reading of this document. The agreed parameter block (13.2) declares `ventana_cuadrante_meses: 24`, but the cell that computes the quadrant (7.4) truncates nothing: it builds `period_range(first_month_of_sale, ULT_MES)`, which over data running from January 2023 to August 2026 is up to 44 months. The classes that drove `destino`, the pilot and every downstream decision were therefore computed over the whole history. Production reproduces that, and `DomainParameters.classification_window_months` defaults to `None`. See §14 #12.
+Classification window: **24 months from each series' first month of sale**,
+recomputed at every cutoff (S30, A5).
 
 ### Quadrants — Syntetos & Boylan
 
@@ -476,7 +475,7 @@ The parameters travel with the versioned policy artifact, which Route A defined 
 the fields as JSON, keys sorted, no whitespace -> SHA-256 -> first 16 hex characters
 ```
 
-For the current defaults that is `bd4371bcce546b17`. **Both routes must agree on this recipe**; if Route A hashes differently, the two fingerprints will never match and the audit is worthless.
+For the current defaults that is `f5f416da285217b5`. **Both routes must agree on this recipe**; if Route A hashes differently, the two fingerprints will never match and the audit is worthless.
 
 ### Parameters still to join it
 
@@ -523,7 +522,7 @@ Scope is from §11: a platform rule holds for every tenant, a calibration does n
 | New product | ≤ 13 weeks | E5 | tenant | `DomainParameters.new_history_max_weeks` |
 | Limited history | 14–52 weeks | E5 | tenant | `DomainParameters.limited_history_max_weeks` |
 | Min observed weeks to forecast | 8 (= 2 × H) | E1 | tenant | `DomainParameters.min_observed_weeks` |
-| Classification window | whole history (declared 24 months) | S30, 13.2 | tenant | `DomainParameters.classification_window_months`, default `None`; see §14 #12 |
+| Classification window | 24 months | S30, A5 | tenant | `DomainParameters.classification_window_months`, default `24` |
 | Weekday weight table | Mon-Fri 1.0, Sat 0.6, Sun 0 | 11.3, 11.4 | tenant | `DomainParameters.weekday_weights` |
 | Full week business days | 5.6 | 11.4 | derived | `full_week_business_days()`, the sum of the table |
 | Year-start closure | 30 Dec - 6 Jan | S34 | tenant **data** | arrives as `closed_dates`; see §7 |
@@ -550,7 +549,7 @@ Every parameter marked `tenant` that is not yet a field of `DomainParameters` is
 5. **Policy format.** Must express the five-dimension routing of §9 and a "no forecast" outcome.
 6. **`UNKNOWN` and the mask.** Resolved in favour of the notebook (`mask = 1`, treated as observed) to preserve parity. Revisit only together with Route A.
 7. ~~**Prediction intervals.**~~ Closed. `ForecastPeriod` carries `lower` and `upper`, validated to contain the estimate, and `domain/intervals.py` computes them from empirical residual quantiles at Route A's 0.10 / 0.90.
-8. **The classification window.** Declared as 24 months, computed over the whole history. Route A has to say which one the policy means; see §14 #12.
+8. **The classification window.** Route A confirmed 24 months (S30, A5).
 9. **`INSUFFICIENT` against `NOT_CLASSIFIABLE`.** §8 proposes a mapping onto Route A's two enum values. Needs confirmation.
 10. **`zero` is not in Route A's model enum.** It is the benchmark every model must beat, and it is the natural forecast for an inactive series, but no policy rule can currently name it.
 
@@ -573,7 +572,7 @@ Listed rather than silently fixed, per the source-of-truth rule in `AGENTS.md`.
 | 9 | Documents described 4 demand classes; the notebook produces 5, and the two ways classification fails need 6. | **Resolved.** `DemandClass` has the six values of Route A's enum; see §8. |
 | 10 | `forecasts` and `forecast_runs` have no column for `policy_version` or `model_version`, which `contract-v1.md` §14 returns and `architecture.md` §26 requires for traceability. | Schema gap to raise with Pango Core. |
 | 11 | Notebook cell 164 (a narrative cell) reports 2,222 products and 18.4 % stockouts, contradicting its own output and cell 166 (1,215 products, 5.2 %). | Stale narrative inside the notebook. The executed outputs and cell 166 are authoritative. |
-| 12 | The notebook's agreed parameters (13.2) declare `ventana_cuadrante_meses: 24`, but the cell that computes the quadrant (7.4) does not truncate: it runs from each series' first month of sale to the last complete month, up to 44 months for this dataset. | **Consequential and unresolved.** The two give different ADI and CV², so different classes and different models. Route B reproduces what was executed, since that is what produced the classes Route A evaluated, and exposes the window as a parameter defaulting to `None`. Route A must confirm. |
+| 12 | The notebook's parameter block and Route A decision record fix `ventana_cuadrante_meses` at 24. | **Resolved.** Route B uses `classification_window_months=24`; the resulting parameter fingerprint is `f5f416da285217b5`. |
 | 13 | `contract-v1.md` §14's profile block had `observed_periods`, `nonzero_periods` and `short_history`, conflating the monthly classification grain with the weekly forecast grain and reducing three history classes to a boolean. | **Resolved.** 1.1 returns the implemented `DemandProfile`, with the two grains counted separately. |
 | 14 | `contract-v1.md` showed string identifiers and `frequency: "weekly"`; the tenant schema has integers and `WEEKLY`. | **Resolved** in 1.1. |
 | 15 | `contract-v1.md` §3 and §8 say that sending `metadata.made_to_order` fails validation. It does not: `metadata` is free-form, so the key is accepted there and never read. Only `made_to_order` at series level is refused, as an unknown field. Checked on 14 November by posting the minimal fixture with the key inside `metadata`: `200`. | **Unresolved.** Either the schema refuses the key inside `metadata`, or the contract says it is ignored. Row 5 above holds only for the series-level field. |

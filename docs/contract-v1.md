@@ -502,7 +502,7 @@ development policy with this shape:
   "policy_version": "development-1",
   "frequency": "WEEKLY",
   "horizon": 4,
-  "params_version": "bd4371bcce546b17",
+  "params_version": "f5f416da285217b5",
   "rules": [
     {
       "when": { "demand_class": "SMOOTH" },

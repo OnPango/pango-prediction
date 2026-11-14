@@ -89,7 +89,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model-ref", default="deepar-dev-v1")
     parser.add_argument("--checkpoint-version", default="dev-1")
-    parser.add_argument("--params-version", default="bd4371bcce546b17")
+    parser.add_argument("--params-version", default="f5f416da285217b5")
     parser.add_argument("--horizon", type=int, default=4)
     parser.add_argument("--input-size", type=int, default=12)
     parser.add_argument("--max-steps", type=int, default=20)
