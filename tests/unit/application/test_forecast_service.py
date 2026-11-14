@@ -11,13 +11,15 @@ from datetime import date, timedelta
 
 import pytest
 
+from pango_prediction.adapters.outbound.registry import default_registry
 from pango_prediction.application.errors import SeriesErrorCode
 from pango_prediction.application.forecast_service import (
     ForecastCommand,
     ForecastService,
 )
 from pango_prediction.domain.calendar import ClosedDates
-from pango_prediction.domain.parameters import DomainParameters
+from pango_prediction.domain.parameters import DEFAULT_PARAMETERS, DomainParameters
+from pango_prediction.domain.policy import ModelPolicy, load_policy
 from pango_prediction.domain.types import (
     DemandClass,
     DemandObservation,
@@ -273,3 +275,125 @@ def test_a_series_with_no_stock_history_says_censoring_was_not_evaluated() -> No
     ).outcomes[0]
 
     assert any("Stock handling" in warning for warning in outcome.warnings)
+
+
+# --- a bad policy parameter must not sink the batch --------------------------
+
+
+def intermittent_sales(weeks: int = 80, every: int = 6) -> tuple[DemandObservation, ...]:
+    """One sale every ``every`` weeks, which profiles as INTERMITTENT.
+
+    Long gaps between sales are what separates it from `weekly_sales`, whose
+    steady weekly demand profiles as SMOOTH. The two shapes let one policy rule
+    match one series and not the other.
+    """
+    first_monday = LAST_WEEK - timedelta(weeks=weeks - 1)
+
+    return tuple(
+        DemandObservation(
+            date=first_monday + timedelta(weeks=index, days=2),
+            quantity=20.0,
+        )
+        for index in range(weeks)
+        if index % every == 0
+    )
+
+
+def policy_routing_everything_to(
+    model: str, params: dict[str, object]
+) -> ModelPolicy:
+    """A policy whose default sends every series to ``model`` with ``params``.
+
+    Built through `load_policy` rather than constructed by hand, so the test
+    proves what the loader actually accepts. It cannot validate these params:
+    only the model knows what it can run with, which is exactly why the model
+    has to refuse them safely.
+    """
+    return load_policy(
+        {
+            "policy_version": "test-1",
+            "frequency": "WEEKLY",
+            "horizon": HORIZON,
+            "params_version": DEFAULT_PARAMETERS.fingerprint(),
+            "rules": [
+                {
+                    "when": {"inactive": True},
+                    "reason": "Inactive series are not forecast.",
+                }
+            ],
+            "default": {"model": model, "params": params},
+        },
+        registry_names=frozenset(default_registry().names),
+        parameters=DEFAULT_PARAMETERS,
+    )
+
+
+def test_a_policy_parameter_the_model_cannot_accept_fails_one_series_at_a_time() -> None:
+    """The regression this branch exists for.
+
+    `moving_average` needs an integer window. Given a string it used to raise a
+    bare ValueError, which no layer caught, so a single misconfigured rule
+    turned the whole request into a 500 and lost the series that were fine.
+    """
+    policy = policy_routing_everything_to("moving_average", {"window": "four"})
+    service = ForecastService(policy, default_registry())
+
+    batch = service.run(
+        command(
+            series_input("1042", demand=weekly_sales(30)),
+            series_input("1043", demand=weekly_sales(30)),
+        )
+    )
+
+    assert batch.ok_count == 0
+    assert [outcome.series_id for outcome in batch.outcomes] == ["1042", "1043"]
+
+    for outcome in batch.outcomes:
+        assert outcome.error is not None
+        assert outcome.error.code is SeriesErrorCode.MODEL_NOT_AVAILABLE
+        assert "window" in outcome.error.message
+        # The series was understood; only the model could not run.
+        assert outcome.profile is not None
+        assert outcome.horizon_business_days
+
+
+def test_a_misconfigured_model_does_not_lose_the_series_that_are_fine() -> None:
+    """Partial results are the point of per-series errors.
+
+    One rule is broken and the default is sound, so the inactive-series rule
+    cannot be what saves the batch: the healthy series has to come back with a
+    forecast while the broken one comes back with an error.
+    """
+    policy = load_policy(
+        {
+            "policy_version": "test-2",
+            "frequency": "WEEKLY",
+            "horizon": HORIZON,
+            "params_version": DEFAULT_PARAMETERS.fingerprint(),
+            "rules": [
+                {
+                    "when": {"demand_class": "SMOOTH"},
+                    "model": "moving_average",
+                    "params": {"window": 0},
+                }
+            ],
+            "default": {"model": "naive"},
+        },
+        registry_names=frozenset(default_registry().names),
+        parameters=DEFAULT_PARAMETERS,
+    )
+    service = ForecastService(policy, default_registry())
+
+    batch = service.run(
+        command(
+            series_input("smooth", demand=weekly_sales(30, quantity=5.0)),
+            series_input("lumpy", demand=intermittent_sales()),
+        )
+    )
+
+    by_id = {outcome.series_id: outcome for outcome in batch.outcomes}
+
+    assert by_id["smooth"].error is not None
+    assert by_id["smooth"].error.code is SeriesErrorCode.MODEL_NOT_AVAILABLE
+    assert by_id["lumpy"].error is None
+    assert by_id["lumpy"].periods

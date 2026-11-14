@@ -507,3 +507,76 @@ def test_a_rejected_request_writes_no_forecast_record(
 
     assert response.status_code == 401
     assert caplog.records == []
+
+
+# --- a misconfigured policy must not become a 500 ----------------------------
+
+
+def forecasts_with_policy(
+    settings: Settings, model: str, params: dict[str, object]
+) -> TestClient:
+    """A client whose policy routes every series to ``model`` with ``params``.
+
+    `create_app` reads the development policy from a fixed path, so the router
+    is mounted directly here. That is the whole composition root minus the file
+    lookup: the same adapter, the same service, the same registry.
+    """
+    from fastapi import FastAPI
+
+    from pango_prediction.adapters.inbound.api.routes import build_router
+    from pango_prediction.adapters.outbound.registry import default_registry
+    from pango_prediction.application.forecast_service import ForecastService
+    from pango_prediction.domain.parameters import DEFAULT_PARAMETERS
+    from pango_prediction.domain.policy import load_policy
+
+    registry = default_registry()
+    policy = load_policy(
+        {
+            "policy_version": "broken-1",
+            "frequency": "WEEKLY",
+            "horizon": 4,
+            "params_version": DEFAULT_PARAMETERS.fingerprint(),
+            "rules": [
+                {
+                    "when": {"inactive": True},
+                    "reason": "Inactive series are not forecast.",
+                }
+            ],
+            "default": {"model": model, "params": params},
+        },
+        registry_names=frozenset(registry.names),
+        parameters=DEFAULT_PARAMETERS,
+    )
+    app = FastAPI()
+    app.include_router(build_router(settings, ForecastService(policy, registry)))
+
+    return TestClient(app)
+
+
+def test_a_policy_parameter_the_model_cannot_accept_is_not_a_server_error(
+    settings: Settings,
+) -> None:
+    """The symptom this branch removes.
+
+    A window the model cannot read used to escape the service as a bare
+    ValueError, which no handler caught, so one misconfigured rule answered 500
+    and took every series in the request down with it.
+    """
+    client = forecasts_with_policy(settings, "moving_average", {"window": "four"})
+
+    response = client.post("/v1/forecasts", json=load_fixture(), headers=AUTH)
+
+    assert response.status_code == 200
+
+    body = response.json()
+    codes = {result["error"]["code"] for result in body["results"]}
+
+    # The fixture already carries one malformed series, so the request mixes
+    # two per-series faults. Both are reported per series; neither escapes.
+    assert "MODEL_NOT_AVAILABLE" in codes
+    assert codes <= {"MODEL_NOT_AVAILABLE", "INVALID_SERIES"}
+    # Every series still comes back with its own error, rather than the request
+    # being lost as a whole.
+    assert len(body["results"]) == len(load_fixture()["series"])
+    assert body["summary"]["ok"] == 0
+    assert body["summary"]["error"] == body["summary"]["total"]

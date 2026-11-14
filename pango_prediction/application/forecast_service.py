@@ -41,6 +41,7 @@ from pango_prediction.ports.model import (
     ForecastTotalModel,
     ModelError,
     ModelRequest,
+    ModelUnavailableError,
 )
 from pango_prediction.ports.registry import ModelNotRegisteredError, ModelRegistry
 
@@ -242,7 +243,7 @@ class ForecastService:
                 )
             total_model = cast(ForecastTotalModel, model)
             total = total_model.predict_total(model_request, periods)
-        except ModelNotRegisteredError as error:
+        except (ModelNotRegisteredError, ModelUnavailableError) as error:
             return SeriesOutcome(
                 series_id=series.series_id,
                 warnings=self._warnings(profile),
