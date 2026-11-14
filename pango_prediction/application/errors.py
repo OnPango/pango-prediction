@@ -32,3 +32,26 @@ class SeriesErrorCode(StrEnum):
 
     UNSUPPORTED_DATA = "UNSUPPORTED_DATA"
     """The series is well formed but outside what the service can handle."""
+
+
+class HorizonMismatchError(Exception):
+    """The request asks for a horizon the loaded policy was not calibrated for.
+
+    Unlike everything above, this is a fault of the whole request and not of
+    one series, so it is an exception rather than a per-series code. Intervals
+    and horizon totals are fitted for the policy's horizon; a policy evaluated
+    at four weeks has nothing honest to say about eight, and answering anyway
+    would deploy something that was never evaluated.
+
+    It is raised by the use case because the use case is what knows the policy.
+    How it is rendered belongs to the inbound adapter: over HTTP it is a 400.
+    """
+
+    def __init__(self, requested: int, expected: int, policy_version: str) -> None:
+        super().__init__(
+            f"The request asks for a horizon of {requested} weeks, but policy "
+            f"{policy_version!r} is calibrated for {expected}."
+        )
+        self.requested = requested
+        self.expected = expected
+        self.policy_version = policy_version
