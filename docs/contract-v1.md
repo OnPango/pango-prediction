@@ -1,6 +1,6 @@
 # PANGO Forecast Service — Contract v1
 
-**Status:** Draft v1  
+**Status:** Implementation contract v1.1
 **Communication:** HTTP + JSON  
 **Caller:** Pango Core (NestJS)  
 **Provider:** Pango Forecast Service (Python / FastAPI)
@@ -57,6 +57,27 @@ Pango Core owns database access, tenancy, authentication, business semantics and
 
 Forecast Service does **not** connect directly to Supabase PostgreSQL.
 
+### Backend integration checklist
+
+Before calling the service, Pango Core must:
+
+1. Select only finalized movements whose `movement_types.counts_as_demand` is
+   true.
+2. Apply reversals, invalidations and internal-movement rules before
+   aggregating demand by `product_warehouse_id` and local calendar date.
+3. Convert `movements.occurred_at` from its stored timezone using
+   `settings.time_zone` (default `America/Bogota`) before assigning a date.
+4. Reconstruct daily closing stock by replaying movements and movement lines;
+   `stock_balances` is current state, not a historical series.
+5. Send the last complete Sunday as `history_end`. A cutoff in the middle of a
+   week drops that partial week.
+6. Send every non-operational date known for the forecast history and horizon,
+   using the tenant-wide and warehouse-specific calendar fields.
+7. Split batches above `MAX_SERIES_PER_REQUEST` into independent requests.
+
+The service does not infer business document semantics, holidays, warehouse
+stock ownership or a made-to-order flag from the request metadata.
+
 ## 3. Versioning
 
 Every request includes:
@@ -85,7 +106,10 @@ These were already wrong rather than newly changed, and are recorded as discrepa
 
 - identifiers are **integers**, not strings: `product_warehouses.id`, `products.id`, `warehouses.id` and `forecast_runs.id` are all integers in the tenant schema;
 - `frequency` is `"WEEKLY"`, the schema's enum casing;
-- `metadata.made_to_order` does not exist and is **rejected**. No such column exists, and the service derives stock handling from the series' own history (notebook S24). Sending it fails validation, because unknown fields are refused rather than ignored - a contract drift should surface, not pass silently;
+- `metadata.made_to_order` does not exist and must not be sent. The service
+  derives stock handling from the series' own history (notebook S24). The
+  formal decision to reject that key inside the otherwise free-form metadata
+  object remains open; until it is closed, Backend must omit it.
 - the `profile` block's field names changed, because 1.0 conflated the two grains it is computed on. See section 14.
 
 ## 4. Authentication
@@ -177,10 +201,13 @@ Content-Type: application/json
   integrations should send `1.1`.
 - `request_id`: required unique tracing identifier.
 - `forecast_run_id`: required Pango Core run identifier; opaque to Forecast Service.
-- `frequency`: required; current supported value `weekly`.
+- `frequency`: required; current supported value `WEEKLY`.
 - `horizon`: required; current production value `4`. It must equal the horizon declared by the loaded model policy: intervals and totals are calibrated for that horizon, so any other value is refused with `400` for the whole request (section 17).
 - `history_end`: required, format `YYYY-MM-DD`.
-- `calendar.closed_dates`: optional array of non-operational dates.
+- `calendar.closed_dates`: optional array of non-operational dates for every
+  warehouse.
+- `calendar.closed_dates_by_warehouse`: optional additional non-operational
+  dates keyed by `warehouses.id`.
 - `series`: required array of product-warehouse series.
 
 No observation after `history_end` may be used.
@@ -222,8 +249,8 @@ Optional, and free-form.
 **No `made_to_order`.** There is no such column, and a flag would compete with
 what the service derives from the series' own stock history (notebook S24): the
 notebook finds 332 series sold to order, while only 13 are routed to an
-aggregated forecast for it. Sending the field fails validation rather than being
-ignored, so the mismatch surfaces during integration instead of in production.
+aggregated forecast for it. Backend must omit this key from `metadata`; whether
+the service rejects it explicitly is still an open decision.
 
 ## 9. Demand observations
 
@@ -269,6 +296,10 @@ Example:
 ```
 
 For the MVP, daily closing stock is preferred.
+
+Stock rows may be sparse: send a row on the days the reconstructed balance
+changes rather than repeating the same balance for every calendar day. The
+service carries the latest known balance forward within the weekly grid.
 
 ## 11. Availability rules
 
@@ -551,6 +582,12 @@ CHECKPOINT_NOT_AVAILABLE
 UNSUPPORTED_DATA
 ```
 
+Pango Core must persist the result for every input series, including failures.
+For a successful series, persist the periods, total, model metadata, warnings
+and profile available in the response. For a failed series, persist the stable
+error code and message without discarding successful series from the same
+request.
+
 ## 17. HTTP status codes
 
 - `200 OK`: request processed; may contain partial series failures.
@@ -568,6 +605,16 @@ UNSUPPORTED_DATA
 Pango Core owns persistence-level idempotency.
 
 Forecast Service never writes business forecast results directly to PostgreSQL.
+
+For retries, send the same `request_id`, `forecast_run_id` and request payload.
+Do not reuse a request identifier for a different batch. A split batch gives
+each request its own identifier, while a retry of one split uses that same
+identifier.
+
+Pango Core should persist `policy_version` from the response envelope and
+`model_name`/`model_version` from each successful series. These values are
+required for later auditability even though the current tenant schema may need
+new columns for them.
 
 ## 19. Forecast evaluation
 
@@ -710,6 +757,10 @@ MAX_SERIES_PER_REQUEST
 
 If needed, Pango Core may split large jobs into multiple calls while keeping the same contract.
 
+Each request must contain at least one series and no more than the configured
+limit. A request over the limit receives `400`; series-level validation or
+model failures are returned inside a `200` response.
+
 ## 21. Logging
 
 Log at least:
@@ -739,3 +790,19 @@ production service
 ```
 
 Benchmark and production must use the same domain implementation.
+
+### Backend delivery checklist
+
+The Backend integration is ready for implementation when it can demonstrate:
+
+- authenticated calls to `/v1/forecasts`;
+- demand filtered through `counts_as_demand`;
+- reversal and final-status handling;
+- timezone-correct daily aggregation;
+- reconstructed daily stock history;
+- Sunday `history_end`;
+- tenant-wide and warehouse-specific closures;
+- persistence of successful forecasts, totals, profiles, warnings and errors;
+- idempotent retries using `request_id`;
+- a partial-run state when some series fail;
+- calls to `/v1/forecast-evaluations` after all forecast periods close.
