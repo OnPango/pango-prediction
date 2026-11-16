@@ -115,6 +115,7 @@ def to_series_input(series: SeriesRequest) -> ForecastSeriesInput:
             for row in series.stock
         ),
         metadata=series.metadata,
+        history_only=series.history_only,
     )
 
 
@@ -140,6 +141,12 @@ def to_command(request: ForecastRequest) -> ForecastCommand:
         horizon=request.horizon,
         series=tuple(to_series_input(series) for series in request.series),
         closed_dates=to_closed_dates(request),
+        # Keyed by string for the same reason as the closed dates: the schema
+        # numbers its warehouses, the domain treats the identifier as opaque.
+        warehouse_holds_stock={
+            str(warehouse.warehouse_id): warehouse.holds_stock
+            for warehouse in request.warehouses
+        },
         # The tenant's calibration will arrive with the policy artifact. Until
         # then the command's own default applies, which is EquipMaster's.
     )
@@ -188,9 +195,10 @@ def to_series_result(
 ) -> SeriesResultResponse:
     """Render one outcome in the envelope the client understands.
 
-    The use case always says when the policy declined a series. A client that
-    predates that status is told what it was told before it existed: an error
-    with the stable code MODEL_NOT_AVAILABLE, naming the reason in its message.
+    The use case always says when a series was declined, whether by the policy
+    or by the request's own warehouse configuration. A client that predates
+    that status is told what it was told before it existed: an error with the
+    stable code MODEL_NOT_AVAILABLE, naming the reason in its message.
     Translating between contract versions belongs here, at the edge, so that
     the application never has to know which client it is talking to.
     """
@@ -207,7 +215,7 @@ def to_series_result(
     if reason is not None and not knows_no_forecast:
         error = SeriesErrorResponse(
             code=SeriesErrorCode.MODEL_NOT_AVAILABLE.value,
-            message=f"The policy does not forecast this series: {reason}.",
+            message=f"This series is not forecast: {reason}.",
         )
         reason = None
 

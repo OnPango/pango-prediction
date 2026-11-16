@@ -57,11 +57,34 @@ class CalendarSpec(_Schema):
     )
 
 
+class WarehouseSpec(_Schema):
+    """Administrator-managed configuration of one warehouse.
+
+    Sent by Pango Core because the service cannot derive it: a warehouse that
+    ran out of stock and one that never holds any look the same in a series.
+    """
+
+    warehouse_id: int = Field(description="warehouses.id")
+    holds_stock: bool = Field(
+        description=(
+            "False makes every series of the warehouse come back as "
+            "no_forecast with the reason non_stock_warehouse"
+        )
+    )
+
+
 class SeriesRequest(_Schema):
     series_id: int = Field(description="product_warehouses.id")
     product_id: int = Field(description="products.id")
     warehouse_id: int = Field(description="warehouses.id")
     metadata: dict[str, Any] = Field(default_factory=dict)
+    history_only: bool = Field(
+        default=False,
+        description=(
+            "The series is sent for its history and is never forecast; it "
+            "comes back as no_forecast with the reason history_only"
+        ),
+    )
     demand: list[DemandRow] = Field(default_factory=list)
     stock: list[StockRow] = Field(default_factory=list)
 
@@ -100,7 +123,35 @@ class ForecastRequest(_Schema):
     )
     history_end: date
     calendar: CalendarSpec = Field(default_factory=CalendarSpec)
+    warehouses: list[WarehouseSpec] = Field(
+        default_factory=list,
+        description=(
+            "Optional. A warehouse left out is treated as holding stock, and "
+            "its series say so in a warning"
+        ),
+    )
     series: Annotated[list[SeriesRequest], Field(min_length=1)]
+
+    @field_validator("warehouses")
+    @classmethod
+    def describe_each_warehouse_once(
+        cls, warehouses: list[WarehouseSpec]
+    ) -> list[WarehouseSpec]:
+        """Refuse two answers to the same question.
+
+        Taking the first or the last would settle a contradiction by the order
+        of a list, which nobody chose on purpose.
+        """
+        seen: set[int] = set()
+
+        for warehouse in warehouses:
+            if warehouse.warehouse_id in seen:
+                raise ValueError(
+                    f"warehouse {warehouse.warehouse_id} is described more than once"
+                )
+            seen.add(warehouse.warehouse_id)
+
+        return warehouses
 
 
 class PeriodResponse(_Schema):
