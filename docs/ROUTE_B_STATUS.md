@@ -2,7 +2,7 @@
 
 PANGO Prediction, the production forecasting service. Prepared for the Route A owner and for whoever tracks this project.
 
-**Last updated:** 14 November 2026 · **Contract served:** v1.2, with 1.0 and 1.1 still answered in 1.1 · **Domain parameters fingerprint:** `f5f416da285217b5`
+**Last updated:** 16 November 2026 · **Contract served:** v1.2, with 1.0 and 1.1 still answered in 1.1 · **Domain parameters fingerprint:** `f5f416da285217b5`
 
 Counts and tables describe `feature/no-forecast-status`, branched from `dev` at
 `9cd42d4`. Section 5 records which Route A questions are closed; the Backend
