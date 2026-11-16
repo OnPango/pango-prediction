@@ -466,8 +466,17 @@ feature/<slug>  one per feature, created from the latest origin/dev
 
   ```bash
   git fetch origin dev
-  git checkout -b feature/<slug> origin/dev
+  git checkout -b feature/<slug> --no-track origin/dev
+  git push -u origin feature/<slug>
   ```
+
+  `--no-track` and the immediate push matter. Without them the new branch
+  tracks `origin/dev`, and anything that syncs the checkout, such as the
+  "Sync Changes" button of an IDE, pulls `dev` into the branch and pushes the
+  branch into `dev`. That happened twice in November 2026 and put unreviewed
+  commits on `dev` without a pull request. Check with
+  `git for-each-ref --format='%(refname:short) -> %(upstream:short)' refs/heads`
+  that a feature branch points at its own remote branch before committing.
 
 - One feature per branch. A feature is one coherent capability that can be reviewed and merged on its own.
 - `<slug>` is lowercase and hyphenated, and names the capability: `feature/policy-loader`, `feature/statsforecast-adapters`.
