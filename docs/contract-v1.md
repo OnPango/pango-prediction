@@ -106,10 +106,11 @@ These were already wrong rather than newly changed, and are recorded as discrepa
 
 - identifiers are **integers**, not strings: `product_warehouses.id`, `products.id`, `warehouses.id` and `forecast_runs.id` are all integers in the tenant schema;
 - `frequency` is `"WEEKLY"`, the schema's enum casing;
-- `metadata.made_to_order` does not exist and must not be sent. The service
-  derives stock handling from the series' own history (notebook S24). The
-  formal decision to reject that key inside the otherwise free-form metadata
-  object remains open; until it is closed, Backend must omit it.
+- `metadata.made_to_order` does not exist and is **rejected** with `422`,
+  both at series level and inside `metadata`. The service derives stock
+  handling from the series' own history (notebook S24), so the flag could only
+  be ignored, and ignoring it silently would hide a contract drift. Every other
+  key of `metadata` stays free-form.
 - the `profile` block's field names changed, because 1.0 conflated the two grains it is computed on. See section 14.
 
 ## 4. Authentication
@@ -249,8 +250,9 @@ Optional, and free-form.
 **No `made_to_order`.** There is no such column, and a flag would compete with
 what the service derives from the series' own stock history (notebook S24): the
 notebook finds 332 series sold to order, while only 13 are routed to an
-aggregated forecast for it. Backend must omit this key from `metadata`; whether
-the service rejects it explicitly is still an open decision.
+aggregated forecast for it. Sending the key fails validation with `422`, so the
+mismatch surfaces during integration instead of in production. It is the only
+key `metadata` refuses.
 
 ## 9. Demand observations
 
