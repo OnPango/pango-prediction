@@ -145,8 +145,9 @@ def build_monthly_series(
     a period in which it did not yet exist, and counting those months would
     make every new series look intermittent.
 
-    Truncating the grid to a fixed number of months is off by default; see
-    `DomainParameters.classification_window_months` for why.
+    The grid is truncated to the most recent
+    `DomainParameters.classification_window_months`, which is 24 since Route A
+    confirmed that window.
     """
     totals = _monthly_totals(demand)
     last_month = last_complete_month_start(history_end)
