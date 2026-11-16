@@ -416,8 +416,11 @@ Monthly quadrants inside the individual-forecast group: 750 intermittent, 258 lu
 Route A confirmed the v1 scope: `zero` is a reference only, the policy has no
 `sold_to_order` rule, and the five no-forecast reasons are
 `inactive`, `sold_to_order`, `non_stock_warehouse`, `no_active_warehouse` and
-`history_only`. Route B only loads and executes the policy; its executable
-`NO_FORECAST` response shape remains a follow-up contract feature.
+`history_only`. They are `NoForecastReason` in `domain/types.py`, and the policy
+loader accepts no other value. Contract 1.2 returns a declined series with
+status `no_forecast` and its reason; see `contract-v1.md` sections 3 and 14.
+The service states only the reasons a policy rule names: the three that depend
+on warehouse configuration wait for the `warehouses[]` request block.
 
 ---
 
@@ -551,12 +554,12 @@ Every parameter marked `tenant` that is not yet a field of `DomainParameters` is
 2. **Year-start closure for future years.** The notebook assumed 1-6 January; Route A's reply says 30 December - 6 January. Immaterial to the service now that Core sends the dates, but the company still has to confirm the rule so Core can generate them. Separately, the notebook's learned `cierre` set should be exported so Core's history matches what was evaluated; see §7.
 3. **`demand_class` and `model` enum values.** Per-tenant enums, not yet created. §8 carries a proposal.
 4. **What happens to the `INSUFFICIENT` class in production.** 44 % of products, 3.8 % of units.
-5. **Policy format.** Must express the five-dimension routing of §9 and a "no forecast" outcome.
+5. **Policy format.** Must express the five-dimension routing of §9 and a "no forecast" outcome. The outcome exists since contract 1.2: a rule states a `reason` from the closed vocabulary instead of a `model`. The `seasonal` dimension is still not expressible.
 6. **`UNKNOWN` and the mask.** Resolved in favour of the notebook (`mask = 1`, treated as observed) to preserve parity. Revisit only together with Route A.
 7. ~~**Prediction intervals.**~~ Closed. `ForecastPeriod` carries `lower` and `upper`, validated to contain the estimate, and `domain/intervals.py` computes them from empirical residual quantiles at Route A's 0.10 / 0.90.
 8. **The classification window.** Route A confirmed 24 months (S30, A5).
-9. **`INSUFFICIENT` against `NOT_CLASSIFIABLE`.** §8 proposes a mapping onto Route A's two enum values. Needs confirmation.
-10. **`zero` is not in Route A's model enum.** It is the benchmark every model must beat, and it is the natural forecast for an inactive series, but no policy rule can currently name it.
+9. ~~**`INSUFFICIENT` against `NOT_CLASSIFIABLE`.**~~ Closed. Route A confirmed the mapping of §8 on 14 November.
+10. ~~**`zero` is not in Route A's model enum.**~~ Closed. Route A confirmed on 14 November that `zero` is a reference only, not a candidate or a policy model in v1. An inactive series is declined with the reason `inactive` instead of being forecast as zero.
 
 ---
 

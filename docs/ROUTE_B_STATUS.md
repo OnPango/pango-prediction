@@ -2,11 +2,11 @@
 
 PANGO Prediction, the production forecasting service. Prepared for the Route A owner and for whoever tracks this project.
 
-**Last updated:** 14 November 2026 · **Contract served:** v1.1 · **Domain parameters fingerprint:** `f5f416da285217b5`
+**Last updated:** 14 November 2026 · **Contract served:** v1.2, with 1.0 and 1.1 still answered in 1.1 · **Domain parameters fingerprint:** `f5f416da285217b5`
 
-Counts and tables describe `dev` at `c84dd44`. Section 5 deliberately keeps
-the Route A decisions open; the Backend contract is now ready for the Core-side
-implementation.
+Counts and tables describe `feature/no-forecast-status`, branched from `dev` at
+`9cd42d4`. Section 5 records which Route A questions are closed; the Backend
+contract is ready for the Core-side implementation.
 
 ---
 
@@ -50,15 +50,15 @@ Source: 2,361 lines of domain, 359 of application, 190 of ports, 1,583 of adapte
 
 | Suite | Tests |
 |---|---|
-| Domain | 218 |
+| Domain | 232 |
 | Models and the port | 67 |
-| Application | 22 |
-| API | 37 |
+| Application | 27 |
+| API | 45 |
 | Integration against the request fixtures | 14 |
 | Registry, config, assembly, architecture, packaging | 43 |
-| **Total** | **401** |
+| **Total** | **428** |
 
-`ruff check .` clean · `mypy --strict` clean across 58 files · architecture tests assert that no inner layer imports a web framework and that the domain imports nothing outward. The model-error isolation regression is covered at the application and HTTP levels.
+`ruff check .` clean · `mypy --strict` clean across 60 files · architecture tests assert that no inner layer imports a web framework and that the domain imports nothing outward. The model-error isolation regression is covered at the application and HTTP levels.
 
 One gap in that coverage: no test runs the StatsForecast wrappers against the real library. Their unit tests replace it with a fake, and the CI smoke request is served by the development policy, which routes to baselines only.
 
@@ -151,7 +151,7 @@ interpreted as the final statistical model decision.
 
 Each of these changes a number or a routing outcome, so none is cosmetic.
 
-Route A's pre-registered criteria of 13 November (`docs/route-a/criteria.md`) fix the scope of policy v1 and bear on two of them: `zero` is not a candidate in any segment (its section 2.1, relevant to 5.3), and policy v1 has no `sold_to_order` rule (its section 2.2 and DEC-9, relevant to 5.5). The questions themselves remain Route A's to close.
+Route A answered on 14 November. 5.1 to 5.5 are closed, 5.6 is implemented for the reasons a policy states, and 5.7 and 5.8 are decided but still need work outside this section: the `warehouses[]` request block, and Core seeding the calendar. Each subsection says where it stands.
 
 ### 5.1 The classification window — resolved
 
@@ -201,15 +201,25 @@ Route A confirmed that `MADE_TO_ORDER` is only the S24 stock-handling class.
 If v2 adds the aggregate-routing rule, its policy condition will be named
 `sold_to_order`; v1 has no such rule.
 
-### 5.6 `NO_FORECAST` is a status, not an error — contract work remains
-
-Route A's reply sketches a third outcome with a reason (`non_stock_warehouse`). Route B has not created it, because the status set belongs to the contract and the policy format. Today those series come back as `MODEL_NOT_AVAILABLE` with warnings. **The contract needs a third status.**
+### 5.6 `NO_FORECAST` is a status, not an error — implemented in contract 1.2
 
 Route A closed the reason vocabulary at `inactive`, `sold_to_order`,
 `non_stock_warehouse`, `no_active_warehouse` and `history_only`; v1 has no
-`sold_to_order` rule. The current service contract still needs a follow-up
-feature to expose these outcomes consistently. History insufficiency remains
-an error path until the policy routes it before model execution.
+`sold_to_order` rule.
+
+Contract 1.2 adds the status. A series the policy declines comes back as
+`status: "no_forecast"` with its `reason`, and `summary.no_forecast` counts it
+apart from `error`. The policy loader accepts only those five reasons.
+
+A status is not an additive field, so it is served only to a client that
+declares 1.2. One that declares 1.0 or 1.1 keeps receiving
+`MODEL_NOT_AVAILABLE`, exactly as before, and is answered in 1.1.
+
+Two things remain. The service states only the reasons a policy rule names,
+which today is `inactive`: `non_stock_warehouse`, `no_active_warehouse` and
+`history_only` depend on the warehouse configuration of 5.7. And history
+insufficiency stays an error path until the policy routes it with a reason of
+its own, which none of the five is.
 
 ### 5.7 How does the service learn a warehouse holds stock?
 
@@ -237,8 +247,8 @@ Route B's covariate reads only the dates and the tenant's table, so history and 
 | Prediction intervals | Implemented. `ForecastPeriod` validates that the estimate lies inside its interval. |
 | Warehouse distribution percentages | Production still forecasts each `product × warehouse` series directly, with no allocation. Since 14 November `domain/allocation.py` holds Route A's top-down arm (A15), so that the 17 November run can compare the two; nothing in the use case calls it, and decision D1 stays open until that run reports. |
 | Contract drift | `contract-v1.md` reconciled to v1.1 and its response example is now **captured from the running service**. Four discrepancies closed. |
-| Route A classification freeze | `DomainParameters`, policy fixture and docs | 24-month window confirmed; fingerprint is `f5f416da285217b5` |
-| EquipMaster calendar seed | External attachment, not repository data | 151 dates verified; Core must seed the tenant calendar |
+| Route A classification freeze | 24-month window confirmed, applied to `DomainParameters`, the policy fixture and the documents; the fingerprint is `f5f416da285217b5`. |
+| EquipMaster calendar seed | 151 dates verified. It is an external attachment, not repository data, and Core must seed the tenant calendar with it. |
 
 ---
 
@@ -265,6 +275,7 @@ Route B's covariate reads only the dates and the tenant's table, so history and 
 | Product-to-warehouse mean allocation | `domain/allocation.py`, PR #10 | Route A's top-down arm; not called by the use case |
 | Horizon-policy validation | `application/errors.py`, API adapter and tests, merged in `c84dd44` | Requests whose horizon differs from the loaded policy are rejected |
 | Model-error isolation | `ports/model.py`, outbound adapters, application and API tests, merged in `7dbe72a` | Configuration and execution failures remain scoped to their series |
+| `no_forecast` status and contract 1.2 | `domain/types.py`, `domain/policy.py`, application and API adapter | Served to clients that declare 1.2; the policy loader accepts only the five agreed reasons |
 
 ---
 

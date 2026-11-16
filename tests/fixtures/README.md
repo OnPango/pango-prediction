@@ -97,7 +97,7 @@ contract leaves optional and free-form:
 | — | `metadata.warehouse_type` | The analysis excluded dropshipping warehouses when estimating the replenishment interval, because they buy to order |
 
 The fixtures declare `contract_version` `1.0` on purpose. The service is on
-`1.1` and accepts either, so they double as the proof that a `1.0` client keeps
+`1.2` and accepts `1.0` and `1.1` too, so they double as the proof that a `1.0` client keeps
 working (`build_fixtures.py`).
 
 ## The calendar
