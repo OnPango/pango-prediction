@@ -30,7 +30,11 @@ deepar = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# The two `-p no:` switches keep pytest from auto-loading the plugins that
+# arrive with StatsForecast, through its `fugue` dependency. This project uses
+# neither, and loading them imports pyarrow, whose DLLs Windows Application
+# Control may block: the run then dies before collecting a single test.
+addopts = "-q -p no:fugue_test -p no:fugue_test_fixtures"
 # The project is not installed into the environment, so the repository root has
 # to be on sys.path. Without this, the `pytest` entry point fails to import
 # `pango_prediction` and only `python -m pytest` works.
