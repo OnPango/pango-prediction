@@ -4,8 +4,8 @@ PANGO Prediction, the production forecasting service. Prepared for the Route A o
 
 **Last updated:** 16 November 2026 · **Contract served:** v1.2, with 1.0 and 1.1 still answered in 1.1 · **Domain parameters fingerprint:** `f5f416da285217b5`
 
-Counts and tables describe `feature/no-forecast-status`, branched from `dev` at
-`9cd42d4`. Section 5 records which Route A questions are closed; the Backend
+Counts and tables describe `feature/warehouse-config-contract`, branched from `dev` at
+`bcfe90e`. Section 5 records which Route A questions are closed; the Backend
 contract is ready for the Core-side implementation.
 
 ---
@@ -52,13 +52,13 @@ Source: 2,361 lines of domain, 359 of application, 190 of ports, 1,583 of adapte
 |---|---|
 | Domain | 232 |
 | Models and the port | 67 |
-| Application | 27 |
-| API | 45 |
+| Application | 41 |
+| API | 56 |
 | Integration against the request fixtures | 14 |
 | Registry, config, assembly, architecture, packaging | 43 |
-| **Total** | **428** |
+| **Total** | **453** |
 
-`ruff check .` clean · `mypy --strict` clean across 60 files · architecture tests assert that no inner layer imports a web framework and that the domain imports nothing outward. The model-error isolation regression is covered at the application and HTTP levels.
+`ruff check .` clean · `mypy --strict` clean across 62 files · architecture tests assert that no inner layer imports a web framework and that the domain imports nothing outward. The model-error isolation regression is covered at the application and HTTP levels.
 
 One gap in that coverage: no test runs the StatsForecast wrappers against the real library. Their unit tests replace it with a fake, and the CI smoke request is served by the development policy, which routes to baselines only.
 
@@ -151,7 +151,7 @@ interpreted as the final statistical model decision.
 
 Each of these changes a number or a routing outcome, so none is cosmetic.
 
-Route A answered on 14 November. 5.1 to 5.5 are closed, 5.6 is implemented for the reasons a policy states, and 5.7 and 5.8 are decided but still need work outside this section: the `warehouses[]` request block, and Core seeding the calendar. Each subsection says where it stands.
+Route A answered on 14 November. 5.1 to 5.5 are closed, 5.6 and 5.7 are implemented in contract 1.2, and 5.8 is decided but needs Core to seed the calendar. Each subsection says where it stands.
 
 ### 5.1 The classification window — resolved
 
@@ -215,19 +215,29 @@ A status is not an additive field, so it is served only to a client that
 declares 1.2. One that declares 1.0 or 1.1 keeps receiving
 `MODEL_NOT_AVAILABLE`, exactly as before, and is answered in 1.1.
 
-Two things remain. The service states only the reasons a policy rule names,
-which today is `inactive`: `non_stock_warehouse`, `no_active_warehouse` and
-`history_only` depend on the warehouse configuration of 5.7. And history
-insufficiency stays an error path until the policy routes it with a reason of
-its own, which none of the five is.
+Four of the five reasons can now be produced: `inactive` and `sold_to_order` by
+a policy rule (policy v1 has no rule for the second), `non_stock_warehouse` and
+`history_only` by the request, as 5.7 describes.
+
+Two things remain. `no_active_warehouse` is never produced: it belongs to the
+product-to-warehouse allocation, which is not connected to the use case. And
+history insufficiency stays an error path until the policy routes it with a
+reason of its own, which none of the five is.
 
 ### 5.7 How does the service learn a warehouse holds stock?
 
 Resolved: `holds_stock` is administrator-managed configuration per warehouse,
 not inferred by Core. EquipMaster is seeded privately from S15; the private
-warehouse identifiers must not enter this repository. The HTTP contract still
-needs the executable `warehouses[]` block and the corresponding no-forecast
-handling before this becomes a production behavior.
+warehouse identifiers must not enter this repository.
+
+Implemented in contract 1.2. The request carries an optional `warehouses[]`
+block, each entry a `warehouse_id` and a `holds_stock`, and a series in a
+warehouse that holds none comes back as `no_forecast` with the reason
+`non_stock_warehouse`. A warehouse the request does not describe is treated as
+holding stock, and its series say so in a warning. A series marked
+`history_only` is declined with that reason. Both are heard before the policy.
+
+What remains is on the Core side: storing the configuration and sending it.
 
 ### 5.8 Export the learned year-end closure
 
@@ -276,6 +286,8 @@ Route B's covariate reads only the dates and the tenant's table, so history and 
 | Horizon-policy validation | `application/errors.py`, API adapter and tests, merged in `c84dd44` | Requests whose horizon differs from the loaded policy are rejected |
 | Model-error isolation | `ports/model.py`, outbound adapters, application and API tests, merged in `7dbe72a` | Configuration and execution failures remain scoped to their series |
 | `no_forecast` status and contract 1.2 | `domain/types.py`, `domain/policy.py`, application and API adapter | Served to clients that declare 1.2; the policy loader accepts only the five agreed reasons |
+| Rejection of `metadata.made_to_order` | API schemas, merged in `bcfe90e` | `422`, as the contract promised since 1.1 |
+| `warehouses[]` and `history_only` | `domain/types.py`, application and API adapter | Decline series by configuration, before the policy is consulted |
 
 ---
 

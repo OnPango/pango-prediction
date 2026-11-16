@@ -107,6 +107,10 @@ Everything 1.1 added was an extra field, so a 1.0 client that ignores response f
 | `results[].reason` states why, from a closed vocabulary of five values | section 14 |
 | `summary.no_forecast` counts those series apart from `error` | section 14 |
 | A policy rule's `reason` must be one of those five values, and a rule cannot state both a `model` and a `reason` | section 15.1 |
+| `warehouses[]` says which warehouses hold stock; a series in one that does not is declined as `non_stock_warehouse` | sections 6, 7 |
+| `series[].history_only` marks a series sent only for its history; it is declined as `history_only` | section 8 |
+
+The two request fields are optional and are accepted whatever version the request declares. Only the status they lead to follows the version, like every declined series.
 
 ### What changed in 1.1
 
@@ -187,11 +191,15 @@ Content-Type: application/json
       "3": ["2026-11-02"]
     }
   },
+  "warehouses": [
+    { "warehouse_id": 3, "holds_stock": true }
+  ],
   "series": [
     {
       "series_id": 1198,
       "product_id": 742,
       "warehouse_id": 3,
+      "history_only": false,
       "metadata": {
         "group2": "REPUESTOS"
       },
@@ -226,6 +234,18 @@ Content-Type: application/json
   warehouse.
 - `calendar.closed_dates_by_warehouse`: optional additional non-operational
   dates keyed by `warehouses.id`.
+- `warehouses`: optional array, one entry per warehouse, each with its
+  `warehouse_id` and a boolean `holds_stock`. It is administrator-managed
+  configuration that Pango Core stores and sends; the service cannot derive
+  it, because a warehouse that ran out of stock and one that never holds any
+  look the same in a series.
+  - A series whose warehouse has `holds_stock: false` is not forecast: it
+    comes back as `no_forecast` with the reason `non_stock_warehouse`.
+  - A warehouse left out, or the whole block left out, is treated as holding
+    stock, and each of its series says so in a warning.
+  - The same `warehouse_id` twice is refused with `422`.
+  - A warehouse with no series in the request is ignored, so the whole
+    configuration can be sent with every batch.
 - `series`: required array of product-warehouse series.
 
 No observation after `history_end` may be used.
@@ -270,6 +290,19 @@ notebook finds 332 series sold to order, while only 13 are routed to an
 aggregated forecast for it. Sending the key fails validation with `422`, so the
 mismatch surfaces during integration instead of in production. It is the only
 key `metadata` refuses.
+
+### `history_only`
+
+Optional boolean, `false` when absent.
+
+`true` marks a series that is sent for its history and is never forecast or
+replenished: for instance the sales of a warehouse that was later renamed or
+split, which cannot be attributed to a warehouse that exists today. It comes
+back as `no_forecast` with the reason `history_only`, so that every series
+sent has a result.
+
+The service does not yet use that history for any other series. It is part of
+the contract now so that Pango Core builds the request once.
 
 ## 9. Demand observations
 
@@ -541,9 +574,19 @@ produce a forecast.
 | `no_active_warehouse` | The product has no active warehouse to receive a forecast |
 | `history_only` | The series is sent for its history and is not itself forecast |
 
-Today the service states only the reasons a policy rule names, which for the development policy is `inactive`. The three reasons that depend on warehouse configuration need the `warehouses[]` request block, which is not part of this version.
+Who states each reason:
 
-A declined series, captured from the service for a request declaring `1.2`:
+| `reason` | Stated by |
+|---|---|
+| `inactive` | A policy rule |
+| `sold_to_order` | A policy rule. Policy v1 has none |
+| `non_stock_warehouse` | The request: `warehouses[]` with `holds_stock: false` |
+| `history_only` | The request: `history_only: true` on the series |
+| `no_active_warehouse` | Nothing yet. It belongs to the product-to-warehouse allocation, which is not connected to the service |
+
+The request is heard before the policy. What an administrator configured stays true however the demand of the series changes, so it needs no policy loaded and is not overridden by one; `history_only` is checked before the warehouse. Declining a series does not excuse its data: invalid input still fails it with `INVALID_SERIES`.
+
+A series the policy declines, captured from the service for a request declaring `1.2`:
 
 ```json
 {
@@ -577,12 +620,26 @@ with `"summary": {"total": 1, "ok": 0, "error": 0, "no_forecast": 1}`. The same 
   ],
   "error": {
     "code": "MODEL_NOT_AVAILABLE",
-    "message": "The policy does not forecast this series: inactive."
+    "message": "This series is not forecast: inactive."
   }
 }
 ```
 
 with `"summary": {"total": 1, "ok": 0, "error": 1, "no_forecast": 0}`. `reason` and `summary.no_forecast` are present in both envelopes; in the older one they are always `null` and `0`.
+
+A series in a warehouse that holds no stock, for a request declaring `1.2`:
+
+```json
+{
+  "series_id": 1042,
+  "status": "no_forecast",
+  "reason": "non_stock_warehouse",
+  "periods": [],
+  "total": null,
+  "warnings": [],
+  "error": null
+}
+```
 
 History insufficiency is **not** a `no_forecast`. A series with too little observable history still comes back as an `error`, and stays one until a policy rule routes it with a reason of its own.
 
@@ -932,4 +989,6 @@ The Backend integration is ready for implementation when it can demonstrate:
 - a partial-run state when some series fail;
 - `contract_version` `1.2` declared, and `no_forecast` results stored as
   decisions and not counted or retried as failures;
+- the `warehouses[]` block sent with every request, from administrator-managed
+  configuration, and historical series marked `history_only`;
 - calls to `/v1/forecast-evaluations` after all forecast periods close.

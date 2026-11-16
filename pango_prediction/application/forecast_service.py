@@ -20,6 +20,7 @@ refuse a whole command is a horizon the policy was not calibrated for, which
 is a fault of the request and not of any series.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from typing import cast
@@ -68,6 +69,15 @@ class ForecastCommand:
 
     Data, not calibration: the weight rule is shared code, the dates arrive
     with the request. See `domain/calendar.py`.
+    """
+
+    warehouse_holds_stock: Mapping[str, bool] = field(default_factory=dict)
+    """Whether each warehouse holds stock, keyed by ``warehouse_id``.
+
+    Administrator-managed configuration, sent with the request because nothing
+    in a series' history can tell a warehouse that ran out from one that never
+    holds stock. A warehouse missing from the mapping is treated as holding
+    stock, and its series say so in a warning.
     """
 
     parameters: DomainParameters = DEFAULT_PARAMETERS
@@ -191,7 +201,17 @@ class ForecastService:
                 ),
             )
 
+        # Known from the request alone, before any of the series' history is
+        # read. Invalid data above still fails the series: declining it must
+        # not hide that what was sent is wrong.
+        declined = self._declined_by_request(series, command)
+
         if not regularized.dates:
+            if declined is not None:
+                # Too little history is no failure for a series that nobody
+                # meant to forecast.
+                return SeriesOutcome(series_id=series.series_id, no_forecast=declined)
+
             return SeriesOutcome(
                 series_id=series.series_id,
                 error=SeriesError(
@@ -231,10 +251,24 @@ class ForecastService:
             command.parameters,
         )
 
+        warnings = self._warnings(profile) + self._warehouse_warnings(series, command)
+
+        if declined is not None:
+            # The request comes before the policy: this was configured by an
+            # administrator and stays true however the series' demand changes,
+            # so it needs no policy and is not overridden by one.
+            return SeriesOutcome(
+                series_id=series.series_id,
+                warnings=warnings,
+                profile=profile,
+                horizon_business_days=horizon_business_days,
+                no_forecast=declined,
+            )
+
         if self._policy is None:
             return SeriesOutcome(
                 series_id=series.series_id,
-                warnings=self._warnings(profile),
+                warnings=warnings,
                 profile=profile,
                 horizon_business_days=horizon_business_days,
                 error=SeriesError(
@@ -248,7 +282,7 @@ class ForecastService:
         except PolicyError as error:
             return SeriesOutcome(
                 series_id=series.series_id,
-                warnings=self._warnings(profile),
+                warnings=warnings,
                 profile=profile,
                 horizon_business_days=horizon_business_days,
                 error=SeriesError(
@@ -263,7 +297,7 @@ class ForecastService:
             # whole of what there is to say.
             return SeriesOutcome(
                 series_id=series.series_id,
-                warnings=self._warnings(profile),
+                warnings=warnings,
                 profile=profile,
                 horizon_business_days=horizon_business_days,
                 no_forecast=decision.reason,
@@ -275,7 +309,7 @@ class ForecastService:
             # path history insufficiency travels until a rule gives it a reason.
             return SeriesOutcome(
                 series_id=series.series_id,
-                warnings=self._warnings(profile),
+                warnings=warnings,
                 profile=profile,
                 horizon_business_days=horizon_business_days,
                 error=SeriesError(
@@ -302,7 +336,7 @@ class ForecastService:
         except (ModelNotRegisteredError, ModelUnavailableError) as error:
             return SeriesOutcome(
                 series_id=series.series_id,
-                warnings=self._warnings(profile),
+                warnings=warnings,
                 profile=profile,
                 horizon_business_days=horizon_business_days,
                 error=SeriesError(
@@ -313,7 +347,7 @@ class ForecastService:
         except ModelError as error:
             return SeriesOutcome(
                 series_id=series.series_id,
-                warnings=self._warnings(profile),
+                warnings=warnings,
                 profile=profile,
                 horizon_business_days=horizon_business_days,
                 error=SeriesError(
@@ -324,13 +358,51 @@ class ForecastService:
 
         return SeriesOutcome(
             series_id=series.series_id,
-            warnings=self._warnings(profile),
+            warnings=warnings,
             profile=profile,
             horizon_business_days=horizon_business_days,
             periods=periods,
             total=total,
             model_name=model.name,
             model_version="development",
+        )
+
+    @staticmethod
+    def _declined_by_request(
+        series: ForecastSeriesInput,
+        command: ForecastCommand,
+    ) -> NoForecastReason | None:
+        """Why the request itself rules the series out, if it does.
+
+        ``history_only`` is about the series and is checked first; a warehouse
+        that holds no stock is about where the series lives. A warehouse the
+        request does not describe is treated as holding stock.
+        """
+        if series.history_only:
+            return NoForecastReason.HISTORY_ONLY
+
+        if command.warehouse_holds_stock.get(series.warehouse_id) is False:
+            return NoForecastReason.NON_STOCK_WAREHOUSE
+
+        return None
+
+    @staticmethod
+    def _warehouse_warnings(
+        series: ForecastSeriesInput,
+        command: ForecastCommand,
+    ) -> tuple[str, ...]:
+        """Say when a warehouse was assumed, not known, to hold stock.
+
+        The stockout reading depends on it: zero stock in a warehouse that
+        never holds any is not a stockout. A history-only series is left out,
+        because nothing is decided from the stock of a historical warehouse.
+        """
+        if series.history_only or series.warehouse_id in command.warehouse_holds_stock:
+            return ()
+
+        return (
+            f"The request does not say whether warehouse {series.warehouse_id} "
+            "holds stock, so it was treated as one that does.",
         )
 
     @staticmethod

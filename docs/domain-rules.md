@@ -419,8 +419,11 @@ Route A confirmed the v1 scope: `zero` is a reference only, the policy has no
 `history_only`. They are `NoForecastReason` in `domain/types.py`, and the policy
 loader accepts no other value. Contract 1.2 returns a declined series with
 status `no_forecast` and its reason; see `contract-v1.md` sections 3 and 14.
-The service states only the reasons a policy rule names: the three that depend
-on warehouse configuration wait for the `warehouses[]` request block.
+A policy rule states `inactive` or `sold_to_order`. The request states the other
+two that are reachable: `non_stock_warehouse`, through a `warehouses[]` entry
+with `holds_stock: false`, and `history_only`, through the flag on the series.
+Both are heard before the policy. `no_active_warehouse` is not produced: it
+belongs to the allocation of `domain/allocation.py`, which nothing calls yet.
 
 ---
 

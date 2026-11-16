@@ -24,6 +24,13 @@ class ForecastSeriesInput:
     demand: tuple[DemandObservation, ...]
     stock: tuple[StockObservation, ...]
     metadata: Mapping[str, object] = field(default_factory=dict)
+    history_only: bool = False
+    """The series is sent for its history and is never forecast or replenished.
+
+    It marks what cannot be attributed to a warehouse that exists today, such as
+    the sales of a warehouse that was later renamed or split. Nothing in the
+    series' own data can say this, so it arrives as a flag.
+    """
 
 
 @dataclass(frozen=True, slots=True)
