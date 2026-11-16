@@ -196,7 +196,12 @@ def test_availability_findings_travel_as_warnings(client: TestClient) -> None:
 
     assert "sold to order" in " ".join(by_id[1198]["warnings"])
     assert "could not be classified" in " ".join(by_id[1403]["warnings"])
-    assert by_id[1042]["warnings"] == []
+
+    # 1042 has no availability finding of its own. The fixtures carry no
+    # `warehouses` block, so the one thing it does say is that its warehouse
+    # was assumed to hold stock.
+    assert len(by_id[1042]["warnings"]) == 1
+    assert "holds stock" in by_id[1042]["warnings"][0]
 
 
 def test_summary_counts_match_the_results(client: TestClient) -> None:
