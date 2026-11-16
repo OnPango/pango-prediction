@@ -11,7 +11,10 @@ the service derives it from history.
 from datetime import date
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+REJECTED_METADATA_KEY = "made_to_order"
+"""The one key `metadata` refuses. See `SeriesRequest.refuse_a_made_to_order_flag`."""
 
 
 class _Schema(BaseModel):
@@ -61,6 +64,25 @@ class SeriesRequest(_Schema):
     metadata: dict[str, Any] = Field(default_factory=dict)
     demand: list[DemandRow] = Field(default_factory=list)
     stock: list[StockRow] = Field(default_factory=list)
+
+    @field_validator("metadata")
+    @classmethod
+    def refuse_a_made_to_order_flag(cls, metadata: dict[str, Any]) -> dict[str, Any]:
+        """Keep metadata free-form, except for the one key that would mislead.
+
+        The service derives stock handling from the series' own history
+        (notebook S24), so a `made_to_order` flag could only ever be ignored.
+        Ignoring it silently would let Pango Core believe it decided something.
+        Unknown fields are refused everywhere else in the request for the same
+        reason; this closes the one place where that rule did not reach.
+        """
+        if REJECTED_METADATA_KEY in metadata:
+            raise ValueError(
+                f"metadata.{REJECTED_METADATA_KEY} is not accepted: the service "
+                "derives stock handling from the series' own stock history"
+            )
+
+        return metadata
 
 
 class ForecastRequest(_Schema):

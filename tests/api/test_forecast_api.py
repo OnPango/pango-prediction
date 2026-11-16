@@ -227,6 +227,37 @@ def test_an_unknown_field_is_rejected(client: TestClient) -> None:
     assert response.status_code == 422
 
 
+def test_made_to_order_inside_metadata_is_rejected(client: TestClient) -> None:
+    """The one key the otherwise free-form metadata must not carry.
+
+    No such column exists, and the service derives stock handling from the
+    series' own history. A flag sent here would be ignored without a word, and
+    Pango Core would believe it controlled something. Refusing it makes that
+    mismatch surface during integration.
+    """
+    payload = load_fixture("forecast_request_minimal.json")
+    payload["series"][0]["metadata"]["made_to_order"] = True
+
+    response = client.post("/v1/forecasts", json=payload, headers=AUTH)
+
+    assert response.status_code == 422
+    assert "made_to_order" in response.text
+
+
+def test_the_rest_of_metadata_stays_free_form(client: TestClient) -> None:
+    """Refusing one key must not turn metadata into a closed schema."""
+    payload = load_fixture("forecast_request_minimal.json")
+    payload["series"][0]["metadata"] = {
+        "anything": "goes",
+        "nested": {"levels": [1, 2, 3]},
+        "made_to_order_note": "a different key, so it is allowed",
+    }
+
+    response = client.post("/v1/forecasts", json=payload, headers=AUTH)
+
+    assert response.status_code == 200
+
+
 def test_a_horizon_below_one_is_rejected(client: TestClient) -> None:
     payload = load_fixture("forecast_request_minimal.json")
     payload["horizon"] = 0
