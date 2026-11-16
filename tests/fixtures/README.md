@@ -30,6 +30,7 @@ $env:PYTHONPATH="."; python tests/fixtures/build_fixtures.py
 | `history_end` | date | Core's cutoff. **Must be a Sunday**, or the final partial week is dropped |
 | `calendar.closed_dates` | date[] | No column. Dates no warehouse operates; see "The calendar" below |
 | `calendar.closed_dates_by_warehouse` | object | No column. Extra closed dates of one warehouse, keyed by `warehouses.id` |
+| `warehouses` | object[] | Administrator-managed `holds_stock` per `warehouses.id`. **Not in these fixtures**, so every series is treated as stock and says so in a warning |
 
 ## Series → schema
 
@@ -48,6 +49,7 @@ $env:PYTHONPATH="."; python tests/fixtures/build_fixtures.py
 | `demand[].quantity` | number | `SUM(movement_lines.quantity)` where the movement type counts as demand |
 | `stock[].date` | date | Day of the reconstructed balance |
 | `stock[].closing_stock` | number | `SUM(stock_balances.quantity)` over the locations and lots of that `product_warehouse_id` |
+| `history_only` | boolean | Administrator-managed mark of a series sent only for its history. Not in these fixtures; `false` when absent |
 
 Identifiers are **integers**, because that is what the schema stores. The
 inbound adapter converts `series_id` to an opaque string for the domain, so the
