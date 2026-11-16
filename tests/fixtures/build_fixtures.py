@@ -24,7 +24,7 @@ from pango_prediction.domain.series import last_complete_week_start
 CONTRACT_VERSION = "1.0"
 """Pinned to what Pango Core sends, which is not what the service serves.
 
-The service is on 1.1 and accepts either, so these fixtures double as the proof
+The service is on 1.2 and still accepts 1.0, so these fixtures double as the proof
 that a 1.0 client keeps working. Raise this only when Core actually moves.
 """
 HISTORY_END = date(2026, 11, 1)  # Sunday: the history ends on a complete week
