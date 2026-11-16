@@ -301,6 +301,27 @@ product_warehouse_id + date
 
 Forecast Service performs weekly aggregation.
 
+### Input granularity
+
+`frequency` and `horizon` describe the forecast that comes back, not the data
+that goes in. Demand is always sent as dated rows, one `date` and one
+`quantity` each, inside the series they belong to. The request has no date
+range and no weekly `from`/`to`: its only range marker is the top-level
+`history_end`.
+
+- Send one row per `product_warehouse_id` and local calendar date, with that
+  day's total. Several rows with the same date are accepted and summed, so one
+  row per movement also works; it only makes the payload larger.
+- Omit the days without demand. The service fills the gaps with zero.
+- Do not pre-aggregate to weeks. The service builds the Monday-Sunday weeks
+  itself, and it classifies demand on calendar **months** computed from the
+  same daily rows (section 14). A weekly total would put the whole demand of a
+  week that straddles two months into one of them.
+- Quantities are gross and non-negative. A negative quantity, or a row dated
+  after `history_end`, fails that series with `INVALID_SERIES`.
+
+Stock rows follow the same shape, a `date` and a `closing_stock` (section 10).
+
 ## 10. Stock observations
 
 Example:
