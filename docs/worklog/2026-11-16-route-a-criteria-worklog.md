@@ -1,6 +1,6 @@
 # Route A selection and acceptance criteria
 
-**Date:** 2026-11-15 · **Branch:** `feature/route-a-criteria-worklog` → `dev`
+**Date:** 2026-11-16 · **Branch:** `feature/route-a-criteria-worklog` → `dev`
 
 ## Goal
 Record the merge of Route A's pre-registered criteria (`docs/route-a/criteria.md`, PR #9). Per A16 that PR carried only the criteria document, so it had no worklog entry; this entry is the one it deferred.
@@ -11,7 +11,8 @@ The document fixes, before any candidate was compared, how the policy v1 and the
 | Commit | Files | What and why |
 |---|---|---|
 | `887fc28` (merged in PR #9, `4a2c8d0`, 13-Nov 14:23) | `docs/route-a/criteria.md` | The criteria document, alone, as A16 requires |
-| Add worklog for the Route A criteria | this file | The deferred worklog entry |
+| `19f1e80` | this file | The deferred worklog entry, as Route A sent it on 15-Nov |
+| Date the criteria worklog by the day its PR opens | this file | The entry was written on 15-Nov and its PR opens on 16-Nov; the worklog README dates an entry by the PR |
 
 ## Checks
 | Check | Result |
