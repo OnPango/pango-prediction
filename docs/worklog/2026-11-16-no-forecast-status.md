@@ -10,10 +10,11 @@ A series the policy chose not to forecast came back as the error `MODEL_NOT_AVAI
 |---|---|---|
 | `6e128c8` | `domain/types.py`, `domain/policy.py`, `tests/unit/domain/test_policy.py`, `config/development_policy.json`, three test modules | `NoForecastReason`, and a policy loader that accepts no other reason |
 | `612929c` | `application/forecast_service.py`, `tests/unit/application/test_no_forecast.py` | The use case reports a declined series as an outcome of its own |
-| `ec03b9f` | `config.py`, `adapters/inbound/api/schemas.py`, `adapters/inbound/api/routes.py`, `tests/api/test_no_forecast_api.py` | Contract 1.2: the status is served to clients that declare it |
+| `34fdf00` | `config.py`, `adapters/inbound/api/schemas.py`, `adapters/inbound/api/routes.py`, `tests/api/test_no_forecast_api.py` | Contract 1.2: the status is served to clients that declare it |
 | `61855f7` | `docs/contract-v1.md`, `docs/ROUTE_B_STATUS.md`, `docs/domain-rules.md`, fixture notes | The contract and the status report describe 1.2 |
 | `87a83fa` | `docs/contract-v1.md` | An answer to a question from the Backend developer, written down where the next reader will look |
-| Add worklog for the no_forecast status | this file, `docs/ROUTE_B_STATUS.md` | This entry, and the date of the status report |
+| `4bf1d98` | this file, `docs/ROUTE_B_STATUS.md` | This entry, and the date of the status report |
+| Correct a commit hash in the no_forecast worklog | this file | The adapter commit was listed under a hash that does not exist |
 
 ## Checks
 | Check | Result |
@@ -38,6 +39,7 @@ A series the policy chose not to forecast came back as the error `MODEL_NOT_AVAI
 - **The development policy keeps `policy_version` `development-1`.** Its routing is unchanged: the same series get no model. Only the text of two reasons changed.
 
 ## Open questions
+- **`dev` already holds the three code commits.** It was fast-forwarded to `34fdf00` between 14 and 16 November, before this entry existed, so the pull request of this branch carries only the three documentation commits and this correction.
 - **`non_stock_warehouse`, `no_active_warehouse` and `history_only` are never produced yet.** They need the `warehouses[]` request block and the per-series `history_only` flag, which is the next branch.
 - **The message a 1.0 or 1.1 client sees changed wording.** The code is the same, `MODEL_NOT_AVAILABLE`. An inactive series now says "The policy does not forecast this series: inactive." and a non-evaluable one says "The policy selected no model."; the explanation in words is in `warnings`, as before.
 - **How much history Core should send is not written anywhere.** The classification looks at the last 24 months and the series starts at its first sale, so less history changes the class, but the contract states no minimum.
