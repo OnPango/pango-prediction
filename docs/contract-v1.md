@@ -1,6 +1,6 @@
 # PANGO Forecast Service — Contract v1
 
-**Status:** Implementation contract v1.1
+**Status:** Implementation contract v1.2
 **Communication:** HTTP + JSON  
 **Caller:** Pango Core (NestJS)  
 **Provider:** Pango Forecast Service (Python / FastAPI)
@@ -84,13 +84,29 @@ Every request includes:
 
 ```json
 {
-  "contract_version": "1.1"
+  "contract_version": "1.2"
 }
 ```
 
 Backward-compatible additions may remain in `1.x`. Breaking changes require a new major version.
 
-**The service serves `1.1` and accepts a request declaring `1.0` or `1.1`.** Everything 1.1 added is additive, so a 1.0 client that ignores response fields it does not know keeps working unchanged.
+**The service serves `1.2` and accepts a request declaring `1.0`, `1.1` or `1.2`.** The version a request declares decides the envelope it is answered in:
+
+| Request declares | Response declares | A series the policy declines |
+|---|---|---|
+| `1.2` | `1.2` | `status: "no_forecast"` with a `reason` |
+| `1.0` or `1.1` | `1.1` | `status: "error"` with code `MODEL_NOT_AVAILABLE`, as before 1.2 |
+
+Everything 1.1 added was an extra field, so a 1.0 client that ignores response fields it does not know kept working unchanged. A status is different: a client that knows `ok` and `error` may branch on exactly those two, so `no_forecast` is never sent to a client that did not ask for 1.2. Nothing else differs between the two envelopes. Both endpoints accept the three versions.
+
+### What changed in 1.2
+
+| Change | Where |
+|---|---|
+| `results[].status` gains `no_forecast`, for a series the policy declines on purpose | section 14 |
+| `results[].reason` states why, from a closed vocabulary of five values | section 14 |
+| `summary.no_forecast` counts those series apart from `error` | section 14 |
+| A policy rule's `reason` must be one of those five values, and a rule cannot state both a `model` and a `reason` | section 15.1 |
 
 ### What changed in 1.1
 
@@ -158,7 +174,7 @@ Content-Type: application/json
 
 ```json
 {
-  "contract_version": "1.1",
+  "contract_version": "1.2",
   "request_id": "req-123",
   "forecast_run_id": 41,
   "frequency": "WEEKLY",
@@ -197,8 +213,9 @@ Content-Type: application/json
 
 ## 7. Top-level fields
 
-- `contract_version`: required; accepted values are `1.0` and `1.1`. New
-  integrations should send `1.1`.
+- `contract_version`: required; accepted values are `1.0`, `1.1` and `1.2`.
+  New integrations should send `1.2`, which is the only one answered with the
+  `no_forecast` status (section 3).
 - `request_id`: required unique tracing identifier.
 - `forecast_run_id`: required Pango Core run identifier; opaque to Forecast Service.
 - `frequency`: required; current supported value `WEEKLY`.
@@ -283,6 +300,27 @@ product_warehouse_id + date
 ```
 
 Forecast Service performs weekly aggregation.
+
+### Input granularity
+
+`frequency` and `horizon` describe the forecast that comes back, not the data
+that goes in. Demand is always sent as dated rows, one `date` and one
+`quantity` each, inside the series they belong to. The request has no date
+range and no weekly `from`/`to`: its only range marker is the top-level
+`history_end`.
+
+- Send one row per `product_warehouse_id` and local calendar date, with that
+  day's total. Several rows with the same date are accepted and summed, so one
+  row per movement also works; it only makes the payload larger.
+- Omit the days without demand. The service fills the gaps with zero.
+- Do not pre-aggregate to weeks. The service builds the Monday-Sunday weeks
+  itself, and it classifies demand on calendar **months** computed from the
+  same daily rows (section 14). A weekly total would put the whole demand of a
+  week that straddles two months into one of them.
+- Quantities are gross and non-negative. A negative quantity, or a row dated
+  after `history_end`, fails that series with `INVALID_SERIES`.
+
+Stock rows follow the same shape, a `date` and a `closing_stock` (section 10).
 
 ## 10. Stock observations
 
@@ -379,7 +417,7 @@ quantity and could not be processed.
 
 ```json
 {
-  "contract_version": "1.1",
+  "contract_version": "1.2",
   "service_version": "0.1.0",
   "policy_version": "development-1",
   "request_id": "req-2026-11-02-0001",
@@ -387,14 +425,14 @@ quantity and could not be processed.
   "summary": {
     "total": 2,
     "ok": 1,
-    "error": 1
+    "error": 1,
+    "no_forecast": 0
   },
   "results": [
     {
       "series_id": 1198,
       "status": "ok",
-      "model_name": "naive",
-      "model_version": "development",
+      "reason": null,
       "periods": [
         {
           "period_start": "2026-11-02",
@@ -423,9 +461,11 @@ quantity and could not be processed.
       ],
       "total": {
         "estimate": 12.0,
-        "lower": 0.0,
-        "upper": 24.0
+        "lower": 4.800000000000001,
+        "upper": 18.0
       },
+      "model_name": "naive",
+      "model_version": "development",
       "warnings": [
         "The series is sold to order, so zero stock was not read as a stockout."
       ],
@@ -454,7 +494,11 @@ quantity and could not be processed.
     {
       "series_id": 1500,
       "status": "error",
+      "reason": null,
       "periods": [],
+      "total": null,
+      "model_name": null,
+      "model_version": null,
       "warnings": [],
       "error": {
         "code": "INVALID_SERIES",
@@ -474,6 +518,71 @@ calibrated aggregate across the requested horizon. Its interval is not formed
 by summing the weekly lower and upper bounds; each model must provide the
 horizon-total interval explicitly. `total` is `null` for a series that did not
 produce a forecast.
+
+### The three statuses
+
+| `status` | Meaning | What accompanies it |
+|---|---|---|
+| `ok` | The series was forecast | `periods`, `total`, `model_name`, `model_version` |
+| `no_forecast` | The policy declined the series on purpose. Nothing failed | `reason`; `periods` is empty and `total` is `null` |
+| `error` | Something prevented a forecast | `error.code` and `error.message` |
+
+`profile`, `warnings` and `horizon_business_days` travel with all three whenever the series got far enough.
+
+`reason` is one of:
+
+| `reason` | Meaning |
+|---|---|
+| `inactive` | The series has not sold within the tenant's inactivity window |
+| `sold_to_order` | Reserved for a later policy. Policy v1 has no rule that uses it |
+| `non_stock_warehouse` | The warehouse holds no stock, so its demand must not drive replenishment |
+| `no_active_warehouse` | The product has no active warehouse to receive a forecast |
+| `history_only` | The series is sent for its history and is not itself forecast |
+
+Today the service states only the reasons a policy rule names, which for the development policy is `inactive`. The three reasons that depend on warehouse configuration need the `warehouses[]` request block, which is not part of this version.
+
+A declined series, captured from the service for a request declaring `1.2`:
+
+```json
+{
+  "series_id": 1042,
+  "status": "no_forecast",
+  "reason": "inactive",
+  "periods": [],
+  "total": null,
+  "warnings": [
+    "Stock handling could not be classified, so stockouts were not evaluated for this series.",
+    "The series has not sold for 94 weeks and is read as inactive.",
+    "The series sold in too few months for its demand pattern to be measured."
+  ],
+  "error": null
+}
+```
+
+with `"summary": {"total": 1, "ok": 0, "error": 0, "no_forecast": 1}`. The same series for a request declaring `1.1`:
+
+```json
+{
+  "series_id": 1042,
+  "status": "error",
+  "reason": null,
+  "periods": [],
+  "total": null,
+  "warnings": [
+    "Stock handling could not be classified, so stockouts were not evaluated for this series.",
+    "The series has not sold for 94 weeks and is read as inactive.",
+    "The series sold in too few months for its demand pattern to be measured."
+  ],
+  "error": {
+    "code": "MODEL_NOT_AVAILABLE",
+    "message": "The policy does not forecast this series: inactive."
+  }
+}
+```
+
+with `"summary": {"total": 1, "ok": 0, "error": 1, "no_forecast": 0}`. `reason` and `summary.no_forecast` are present in both envelopes; in the older one they are always `null` and `0`.
+
+History insufficiency is **not** a `no_forecast`. A series with too little observable history still comes back as an `error`, and stays one until a policy rule routes it with a reason of its own.
 
 ### The profile block
 
@@ -499,7 +608,8 @@ With the development policy, successful series include four `periods`,
 `model_name`, `model_version` and `policy_version`. Route A can replace the
 development artifact without changing the HTTP envelope. Series that are not
 evaluable or have no applicable policy continue to return an empty `periods`
-array and a stable per-series error.
+array and a stable per-series error. Series the policy declines return
+`no_forecast` to a 1.2 client, as described above.
 
 ## 15. DeepAR metadata
 
@@ -550,6 +660,18 @@ Rules are evaluated in declaration order. A rule may match
 `demand_class`, `history_class`, `stock_handling`, `inactive` or `evaluable`.
 The policy loader rejects an unknown model, an incompatible frequency or
 horizon, and a `params_version` that does not match the domain calibration.
+
+A rule states either a `model`, which forecasts the series, or a `reason`,
+which declines it:
+
+```json
+{ "when": { "inactive": true }, "reason": "inactive" }
+```
+
+`reason` must be one of the five values of section 14; the loader rejects any
+other, and rejects a rule that states both a `model` and a `reason`. A rule
+with neither is accepted and means the policy has nothing for the series:
+that is reported as the error `MODEL_NOT_AVAILABLE`, not as `no_forecast`.
 This policy is for integration testing only; it is not Route A's final model
 selection decision.
 
@@ -586,7 +708,8 @@ Pango Core must persist the result for every input series, including failures.
 For a successful series, persist the periods, total, model metadata, warnings
 and profile available in the response. For a failed series, persist the stable
 error code and message without discarding successful series from the same
-request.
+request. For a declined series, persist the `no_forecast` status and its
+`reason`: it is a decision to keep, not a failure to retry.
 
 ## 17. HTTP status codes
 
@@ -805,4 +928,6 @@ The Backend integration is ready for implementation when it can demonstrate:
 - persistence of successful forecasts, totals, profiles, warnings and errors;
 - idempotent retries using `request_id`;
 - a partial-run state when some series fail;
+- `contract_version` `1.2` declared, and `no_forecast` results stored as
+  decisions and not counted or retried as failures;
 - calls to `/v1/forecast-evaluations` after all forecast periods close.
