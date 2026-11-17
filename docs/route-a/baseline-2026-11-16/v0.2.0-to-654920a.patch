@@ -1,0 +1,173 @@
+diff --git a/pango_prediction/domain/policy.py b/pango_prediction/domain/policy.py
+index 8c316d1..e4d9c5b 100644
+--- a/pango_prediction/domain/policy.py
++++ b/pango_prediction/domain/policy.py
+@@ -17,6 +17,7 @@ from pango_prediction.domain.types import (
+     DemandProfile,
+     HistoryClass,
+     ModelSpec,
++    NoForecastReason,
+     StockHandling,
+ )
+ 
+@@ -27,10 +28,18 @@ class PolicyError(ValueError):
+ 
+ @dataclass(frozen=True, slots=True)
+ class PolicyDecision:
+-    """The result of applying policy rules to one demand profile."""
++    """The result of applying policy rules to one demand profile.
++
++    Three shapes, and the difference matters downstream:
++
++    - a ``model``: forecast the series with it;
++    - no model and a ``reason``: the policy declines the series on purpose;
++    - neither: the policy has nothing for the series and does not say why,
++      which is reported as a missing model rather than as a decision.
++    """
+ 
+     model: ModelSpec | None
+-    reason: str | None = None
++    reason: NoForecastReason | None = None
+ 
+ 
+ @dataclass(frozen=True, slots=True)
+@@ -42,7 +51,7 @@ class PolicyRule:
+     """
+ 
+     model: ModelSpec | None
+-    reason: str | None
++    reason: NoForecastReason | None
+     demand_class: DemandClass | None = None
+     history_class: HistoryClass | None = None
+     stock_handling: StockHandling | None = None
+@@ -189,8 +198,13 @@ def _parse_rule(
+                 f"available models: {', '.join(sorted(registry_names)) or 'none'}"
+             )
+ 
+-    if reason is not None and not isinstance(reason, str):
+-        raise PolicyError(f"{location}.reason must be a string")
++    no_forecast_reason = _reason(reason, location)
++
++    if model_name is not None and no_forecast_reason is not None:
++        raise PolicyError(
++            f"{location} states both a model and a reason; a rule either "
++            "forecasts a series or declines it"
++        )
+ 
+     params = value.get("params", {})
+     if not isinstance(params, Mapping):
+@@ -198,7 +212,7 @@ def _parse_rule(
+ 
+     return PolicyRule(
+         model=None if model_name is None else ModelSpec(model_name, dict(params)),
+-        reason=reason,
++        reason=no_forecast_reason,
+         demand_class=_enum_condition(
+             conditions, "demand_class", DemandClass, location
+         ),
+@@ -213,6 +227,30 @@ def _parse_rule(
+     )
+ 
+ 
++def _reason(raw: object, location: str) -> NoForecastReason | None:
++    """Read a rule's ``reason`` from the closed no-forecast vocabulary.
++
++    Checked as strictly as a model name, and for the same purpose: a misspelt
++    reason would otherwise turn a declined series into something else without
++    anyone being told. It surfaces here, when the artifact is loaded.
++    """
++    if raw is None:
++        return None
++
++    allowed = ", ".join(reason.value for reason in NoForecastReason)
++
++    if not isinstance(raw, str):
++        raise PolicyError(f"{location}.reason must be one of: {allowed}")
++
++    try:
++        return NoForecastReason(raw)
++    except ValueError as error:
++        raise PolicyError(
++            f"{location}.reason {raw!r} is not a no-forecast reason; "
++            f"expected one of: {allowed}"
++        ) from error
++
++
+ def _enum_condition(
+     conditions: Mapping[str, object],
+     key: str,
+diff --git a/pango_prediction/domain/profile.py b/pango_prediction/domain/profile.py
+index a4f1618..1fee873 100644
+--- a/pango_prediction/domain/profile.py
++++ b/pango_prediction/domain/profile.py
+@@ -145,8 +145,9 @@ def build_monthly_series(
+     a period in which it did not yet exist, and counting those months would
+     make every new series look intermittent.
+ 
+-    Truncating the grid to a fixed number of months is off by default; see
+-    `DomainParameters.classification_window_months` for why.
++    The grid is truncated to the most recent
++    `DomainParameters.classification_window_months`, which is 24 since Route A
++    confirmed that window.
+     """
+     totals = _monthly_totals(demand)
+     last_month = last_complete_month_start(history_end)
+diff --git a/pango_prediction/domain/types.py b/pango_prediction/domain/types.py
+index fd5d457..f873388 100644
+--- a/pango_prediction/domain/types.py
++++ b/pango_prediction/domain/types.py
+@@ -24,6 +24,13 @@ class ForecastSeriesInput:
+     demand: tuple[DemandObservation, ...]
+     stock: tuple[StockObservation, ...]
+     metadata: Mapping[str, object] = field(default_factory=dict)
++    history_only: bool = False
++    """The series is sent for its history and is never forecast or replenished.
++
++    It marks what cannot be attributed to a warehouse that exists today, such as
++    the sales of a warehouse that was later renamed or split. Nothing in the
++    series' own data can say this, so it arrives as a flag.
++    """
+ 
+ 
+ @dataclass(frozen=True, slots=True)
+@@ -79,6 +86,40 @@ class StockHandling(StrEnum):
+     NOT_CLASSIFIABLE = "NOT_CLASSIFIABLE"
+ 
+ 
++class NoForecastReason(StrEnum):
++    """Why a series is deliberately not forecast.
++
++    Declining a series is a decision, not a failure: most of a catalogue is
++    inactive products and warehouses that hold no stock, and none of that is
++    something going wrong. The set is closed and was agreed with Route A, so a
++    policy naming anything else is a broken artifact.
++
++    The values are lower case because they are the ones a policy file states in
++    its ``reason`` key and the ones the response returns, unchanged.
++
++    INACTIVE
++        The series has not sold within the tenant's inactivity window (S29).
++    SOLD_TO_ORDER
++        The series is routed away because it is sold to order. Reserved for a
++        later policy: policy v1 has no rule that uses it. Not the same thing as
++        `StockHandling.MADE_TO_ORDER`, which only describes how zero stock is
++        read.
++    NON_STOCK_WAREHOUSE
++        The warehouse holds no stock, so its demand must not drive
++        replenishment.
++    NO_ACTIVE_WAREHOUSE
++        The product has no active warehouse to receive a forecast.
++    HISTORY_ONLY
++        The series is sent for its history and is not itself forecast.
++    """
++
++    INACTIVE = "inactive"
++    SOLD_TO_ORDER = "sold_to_order"
++    NON_STOCK_WAREHOUSE = "non_stock_warehouse"
++    NO_ACTIVE_WAREHOUSE = "no_active_warehouse"
++    HISTORY_ONLY = "history_only"
++
++
+ @dataclass(frozen=True, slots=True)
+ class WeeklyAvailability:
+     """Availability of a weekly series, aligned to ``RegularizedSeries.dates``.
