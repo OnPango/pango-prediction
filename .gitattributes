@@ -1,0 +1,5 @@
+# Route A artifacts are audited by byte-level SHA-256, including line endings.
+/config/model_policy.json -text
+/docs/route-a/baseline-2026-11-16/regla_baseline_inactivas_2026-11-16.md -text
+/docs/route-a/baseline-2026-11-16/respaldo_inactivas.csv -text
+/docs/route-a/baseline-2026-11-16/MANIFIESTO_6a7f43c25ba78541.json -text

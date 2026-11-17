@@ -75,7 +75,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     registry = default_registry()
-    policy_path = Path(__file__).parents[1] / "config" / "development_policy.json"
+    policy_path = (
+        Path(resolved.policy_path)
+        if resolved.policy_path is not None
+        else Path(__file__).parents[1] / "config" / "development_policy.json"
+    )
     policy = load_policy(
         policy_path,
         registry_names=frozenset(registry.names),

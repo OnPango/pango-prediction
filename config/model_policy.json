@@ -1,0 +1,27 @@
+{
+  "policy_version": "ruta-a-baseline-v1-inactive",
+  "frequency": "WEEKLY",
+  "horizon": 4,
+  "params_version": "f5f416da285217b5",
+  "rules": [
+    {
+      "when": {
+        "inactive": true
+      },
+      "reason": "inactive"
+    },
+    {
+      "when": {},
+      "model": "moving_average",
+      "params": {
+        "window": 4
+      }
+    }
+  ],
+  "default": {
+    "model": "moving_average",
+    "params": {
+      "window": 4
+    }
+  }
+}
