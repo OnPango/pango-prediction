@@ -1,6 +1,6 @@
 """Runtime configuration, read from the environment.
 
-Deliberately built on the standard library: the service needs three values, and
+Deliberately built on the standard library: the service needs a few values, and
 a settings library would be a dependency bought for convenience.
 
 The service credential is required. A prediction service deployed without one
@@ -37,6 +37,7 @@ existed: as the error it already handles.
 SERVICE_TOKEN_ENV = "PANGO_PREDICTION_SERVICE_TOKEN"
 MAX_SERIES_ENV = "PANGO_PREDICTION_MAX_SERIES_PER_REQUEST"
 LOG_LEVEL_ENV = "PANGO_PREDICTION_LOG_LEVEL"
+POLICY_PATH_ENV = "PANGO_PREDICTION_POLICY_PATH"
 
 DEFAULT_MAX_SERIES_PER_REQUEST = 500
 DEFAULT_LOG_LEVEL = "INFO"
@@ -55,6 +56,8 @@ class Settings:
     log_level: str = DEFAULT_LOG_LEVEL
     """Level for the service's own records, which the contract's section 20
     request log is emitted at. Defaulted so a test need not supply it."""
+    policy_path: str | None = None
+    """Explicit artifact path; None keeps the development policy."""
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -93,4 +96,5 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         service_token=token,
         max_series_per_request=max_series,
         log_level=level,
+        policy_path=source.get(POLICY_PATH_ENV, "").strip() or None,
     )
