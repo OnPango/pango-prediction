@@ -10,7 +10,10 @@ dependencies = [
     # them installed.
     "fastapi>=0.115",
     "numpy>=2.0",
-    "pydantic>=2.9",
+    # 2.12 is the first release that honours Field(exclude_if=...), which keeps
+    # the opt-in validation block out of responses that did not ask for it.
+    # 2.11 accepts the argument and silently ignores it.
+    "pydantic>=2.12",
     "statsforecast==2.1.1",
     "uvicorn[standard]>=0.30",
 ]
