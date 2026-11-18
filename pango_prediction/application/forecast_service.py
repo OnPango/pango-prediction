@@ -49,6 +49,7 @@ from pango_prediction.domain.types import (
 )
 from pango_prediction.ports.model import (
     ForecastTotalModel,
+    InsufficientHistoryError,
     ModelError,
     ModelRequest,
     ModelUnavailableError,
@@ -94,6 +95,15 @@ class ForecastCommand:
 class SeriesError:
     code: SeriesErrorCode
     message: str
+    model_history_insufficient: bool = False
+    """The selected model refused the series for too few observable weeks.
+
+    Not a code of its own on purpose: it still travels as MODEL_FAILED, because
+    routing history insufficiency to its own outcome is deferred until after
+    20-nov (Route A baseline README). The holdout validation needs to tell it
+    apart, since Route A's evaluation counted such a series as a zero forecast
+    (criteria DEC-1) while every other failure is left unscored.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -353,6 +363,9 @@ class ForecastService:
                 error=SeriesError(
                     code=SeriesErrorCode.MODEL_FAILED,
                     message=str(error),
+                    model_history_insufficient=isinstance(
+                        error, InsufficientHistoryError
+                    ),
                 ),
             )
 

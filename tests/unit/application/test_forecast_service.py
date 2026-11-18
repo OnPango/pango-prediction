@@ -23,10 +23,17 @@ from pango_prediction.domain.policy import ModelPolicy, load_policy
 from pango_prediction.domain.types import (
     DemandClass,
     DemandObservation,
+    ForecastPeriod,
     ForecastSeriesInput,
     HistoryClass,
     StockObservation,
 )
+from pango_prediction.ports.model import (
+    InsufficientHistoryError,
+    ModelError,
+    ModelRequest,
+)
+from pango_prediction.ports.registry import ModelRegistry
 
 HISTORY_END = date(2026, 11, 1)  # a Sunday, so its week is complete
 LAST_WEEK = date(2026, 10, 26)
@@ -397,3 +404,77 @@ def test_a_misconfigured_model_does_not_lose_the_series_that_are_fine() -> None:
     assert by_id["smooth"].error.code is SeriesErrorCode.MODEL_NOT_AVAILABLE
     assert by_id["lumpy"].error is None
     assert by_id["lumpy"].periods
+
+
+# --- too little history for the model is still MODEL_FAILED, but known ---
+
+
+class _RefusingModel:
+    """A model that refuses every series with the exception it was given."""
+
+    def __init__(self, name: str, error: ModelError) -> None:
+        self._name = name
+        self._error = error
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def predict(self, request: ModelRequest) -> tuple[ForecastPeriod, ...]:
+        raise self._error
+
+
+def _service_with(model: _RefusingModel) -> ForecastService:
+    registry = ModelRegistry(model)
+    policy = load_policy(
+        {
+            "policy_version": "test-3",
+            "frequency": "WEEKLY",
+            "horizon": HORIZON,
+            "params_version": DEFAULT_PARAMETERS.fingerprint(),
+            "rules": [{"when": {"inactive": True}, "reason": "inactive"}],
+            "default": {"model": model.name},
+        },
+        registry_names=frozenset(registry.names),
+        parameters=DEFAULT_PARAMETERS,
+    )
+    return ForecastService(policy, registry)
+
+
+def test_too_little_history_for_the_model_stays_model_failed_but_is_flagged() -> None:
+    """The wire code is unchanged: insufficiency is not routed until after 20-nov.
+
+    The flag exists for the holdout validation, which counts such a series as a
+    zero forecast the way Route A's evaluation did (criteria DEC-1).
+    """
+    service = _service_with(
+        _RefusingModel("short", InsufficientHistoryError("needs 5 weeks"))
+    )
+
+    outcome = service.run(command(series_input(demand=weekly_sales(30)))).outcomes[0]
+
+    assert outcome.error is not None
+    assert outcome.error.code is SeriesErrorCode.MODEL_FAILED
+    assert outcome.error.message == "needs 5 weeks"
+    assert outcome.error.model_history_insufficient is True
+
+
+def test_any_other_model_failure_is_not_read_as_too_little_history() -> None:
+    service = _service_with(_RefusingModel("broken", ModelError("diverged")))
+
+    outcome = service.run(command(series_input(demand=weekly_sales(30)))).outcomes[0]
+
+    assert outcome.error is not None
+    assert outcome.error.code is SeriesErrorCode.MODEL_FAILED
+    assert outcome.error.model_history_insufficient is False
+
+
+def test_the_real_moving_average_flags_a_history_shorter_than_its_window() -> None:
+    policy = policy_routing_everything_to("moving_average", {"window": 4})
+    service = ForecastService(policy, default_registry())
+
+    outcome = service.run(command(series_input(demand=weekly_sales(4)))).outcomes[0]
+
+    assert outcome.error is not None
+    assert outcome.error.code is SeriesErrorCode.MODEL_FAILED
+    assert outcome.error.model_history_insufficient is True
