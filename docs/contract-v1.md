@@ -112,6 +112,10 @@ Everything 1.1 added was an extra field, so a 1.0 client that ignores response f
 
 The two request fields are optional and are accepted whatever version the request declares. Only the status they lead to follows the version, like every declined series.
 
+### Opt-in validation, within 1.2
+
+`include_validation` (section 7) and the `validation` block it adds (section 14) did not raise the version. A client only receives the block by asking for it, so no client can be surprised by it, and a client that does not ask receives the same bytes as before. Raising the served version would instead have changed `contract_version` in every response, including those of clients that never use the block. The field is accepted whatever version the request declares.
+
 ### What changed in 1.1
 
 | Change | Where |
@@ -246,6 +250,12 @@ Content-Type: application/json
   - The same `warehouse_id` twice is refused with `422`.
   - A warehouse with no series in the request is ignored, so the whole
     configuration can be sent with every batch.
+- `include_validation`: optional JSON boolean, `false` by default. When `true`,
+  every result carries a `validation` block: the policy's score on the last
+  complete weeks of the history sent (section 14, "The validation block"). Any
+  value other than `true` or `false`, such as `"true"` or `1`, is refused with
+  `422`. When it is absent or `false`, the response is exactly what it was
+  before the block existed.
 - `series`: required array of product-warehouse series.
 
 No observation after `history_end` may be used.
@@ -661,6 +671,79 @@ The monthly and the weekly counts disagree on purpose: classification happens mo
 
 **This replaces 1.0's profile block**, which had `observed_periods`, `nonzero_periods` and `short_history`. Those conflated the two grains into one pair of counters and reduced three history classes to a boolean. The `demand_class` values are also upper case, matching Route A's enum.
 
+### The validation block
+
+Only present when the request sets `include_validation: true`. It answers "how well does the deployed policy forecast this series?" from the first run, before any forecast's own horizon has closed.
+
+**Method.** The last `horizon` complete weeks of the history sent are held out. The service cuts the history at `train_end`, the Sunday before them, and runs the unchanged forecast pipeline on what remains: series, availability, profile, policy and model, all recomputed from data up to `train_end`. It then compares that forecast with what happened in the held-out weeks. A trailing partial week is not held out, as it is not forecast.
+
+**Labels.** Each held-out week is labelled by the service's own availability rules (section 11), applied to the history up to the end of the held-out weeks. `CENSORED` and `OUT_OF_ASSORTMENT` weeks have `evaluable: false` and leave the error; `AVAILABLE` and `UNKNOWN` weeks are evaluable, as in Route A's evaluation. A known limitation: weeks after a series' last sale read as inactivity, so a stockout that covers the end of the held-out weeks is scored as zero demand.
+
+**Score.** Route A's series-block convention (`docs/route-a/criteria.md` §1.3, §1.7), named by `"convention": "route_a_series_block"`:
+
+| Field | Meaning |
+|---|---|
+| `actual_total` (y) | Actual demand summed over the evaluable weeks |
+| `forecast_total` (f) | Point forecast summed over the same weeks |
+| `error` | `f - y`. **Positive means over-forecast** |
+| `absolute_error` | `abs(f - y)` |
+| `wape` | `abs(f - y) / y`; `null` when y is 0 |
+| `bias` | `(f - y) / y`; `null` when y is 0. Positive means over-forecast |
+| `weekly_coverage` | Share of evaluable weeks inside their weekly interval; `null` without an interval |
+| `total_inside_interval` | Whether y lies inside the horizon-total interval; only measured when every held-out week is evaluable, otherwise `null` |
+
+To aggregate several series, sum the components and divide: WAPE is the sum of `absolute_error` over the sum of `actual_total`, bias the sum of `error` over the sum of `actual_total`. An average of the per-series ratios is not Route A's metric.
+
+**Which series are scored.**
+
+| Case | `status` | `counted_as_zero` | `reason` |
+|---|---|---|---|
+| The policy forecast the series at `train_end` | `evaluated` | `false` | `null` |
+| The policy declined it at `train_end` (for example `inactive`), or its model refused a short history | `evaluated` | `true`: scored as f = 0, as Route A did (DEC-1) | `null` |
+| `history_only`, or a warehouse with `holds_stock: false` | `not_evaluated` | `false` | `declined_by_request` |
+| No sale before `train_end` | `not_evaluated` | `false` | `no_history_at_cutoff` |
+| Any other failure at `train_end`, such as invalid data | `not_evaluated` | `false` | `forecast_failed` |
+| The held-out weeks themselves cannot be built from the data | `not_evaluated` | `false` | `invalid_series` |
+| Fewer than two evaluable held-out weeks | `not_evaluated` | per the rows above | `too_few_evaluable_weeks` |
+
+`forecast_status`, `forecast_reason`, `forecast_error` and `model_name` describe what the policy decided at `train_end`. They use the full vocabulary whatever version the request declared: the block is opt-in, so a client that asks for it reads this section. `weeks` lists the held-out weeks whenever they can be built, even when the series is not scored, so a client can show why.
+
+Captured from the running service with the delivered Route A policy, for series 1042 of `tests/fixtures/forecast_request.json`:
+
+```json
+"validation": {
+  "convention": "route_a_series_block",
+  "status": "evaluated",
+  "reason": null,
+  "train_end": "2026-10-04",
+  "forecast_status": "ok",
+  "forecast_reason": null,
+  "forecast_error": null,
+  "model_name": "moving_average",
+  "counted_as_zero": false,
+  "weeks": [
+    {"period_start": "2026-10-05", "actual": 3.0, "availability": "AVAILABLE", "evaluable": true, "estimate": 3.25, "lower": 0.0, "upper": 5.475},
+    {"period_start": "2026-10-12", "actual": 4.0, "availability": "AVAILABLE", "evaluable": true, "estimate": 3.25, "lower": 0.0, "upper": 5.475},
+    {"period_start": "2026-10-19", "actual": 4.0, "availability": "AVAILABLE", "evaluable": true, "estimate": 3.25, "lower": 0.0, "upper": 5.475},
+    {"period_start": "2026-10-26", "actual": 3.0, "availability": "AVAILABLE", "evaluable": true, "estimate": 3.25, "lower": 0.0, "upper": 5.475}
+  ],
+  "total": {"estimate": 13.0, "lower": 5.6, "upper": 17.8},
+  "metrics": {
+    "evaluable_weeks": 4,
+    "actual_total": 14.0,
+    "forecast_total": 13.0,
+    "error": -1.0,
+    "absolute_error": 1.0,
+    "wape": 0.07142857142857142,
+    "bias": -0.07142857142857142,
+    "weekly_coverage": 1.0,
+    "total_inside_interval": true
+  }
+}
+```
+
+The block is a diagnostic of the policy on the series' recent past. It does not change the forecast returned for the weeks ahead, it is not a guarantee for them, and `1 - wape` is not an accuracy percentage. It also differs on purpose from section 19, which scores a stored forecast week by week with `actual - estimate`: the two must not be mixed in one figure.
+
 ### Not yet populated
 
 With the development policy, successful series include four `periods`,
@@ -928,6 +1011,13 @@ When the observable actual total is zero, WAPE and Bias are `null`. When MASE
 does not have enough history or has a zero scale, it is `null`. Pango Core
 persists the request facts and the returned metrics; Prediction calculates the
 official values.
+
+These conventions are not Route A's. Here errors are weekly and signed
+`actual - estimate`, so a positive bias means under-forecast; the validation
+block of section 14 follows Route A, with one error per block and `f - y`, so a
+positive bias there means over-forecast. Reconciling the two with Route A is
+pending. Until then, a figure from one must not be compared with, or averaged
+into, a figure from the other.
 
 ## 20. Batching
 

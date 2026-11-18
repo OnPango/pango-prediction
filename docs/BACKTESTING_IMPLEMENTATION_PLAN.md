@@ -3,6 +3,25 @@
 Fecha: 2026-11-17. Repositorio: `pango-prediction`, Ruta B.
 Estado: plan para implementación; no describe una funcionalidad ya terminada.
 
+> **Actualización 2026-11-18, decisión de la propietaria.** Se implementó primero
+> una validación por retención dentro de `/v1/forecasts`, opcional con
+> `include_validation` (`application/validation.py`; contrato §14, "The validation
+> block"). Separa las últimas cuatro semanas completas, las pronostica con la
+> historia anterior y las puntúa con la convención de serie-bloque de Ruta A.
+> Eso sustituye tres puntos de este plan:
+>
+> - §2: el endpoint de pronóstico sí cambia, de forma aditiva y solo si se pide.
+> - §8 y §9: las métricas siguen a Ruta A (`e = f − y` sobre sumas de semanas
+>   evaluables, bloque descartado con menos de dos, f = 0 para las series que la
+>   policy declina o cuyo modelo rechaza por historia corta). No son las
+>   semanales de `evaluate_forecast`.
+> - §7: el etiquetado usa la historia hasta el final de las semanas retenidas.
+>
+> El backtesting offline con varios cortes y CLI de este plan queda para después
+> del 20-nov. Cuando se retome, debe reutilizar `HoldoutValidation` y
+> `evaluate_block` en vez de definir otra convención. Ver
+> `docs/worklog/2026-11-18-forecast-validation.md`.
+
 ## 1. Encargo para Claude
 
 Implementa un backtesting offline de la policy existente: para cada serie y corte
