@@ -1,0 +1,64 @@
+# PANGO Prediction - CPU API image (plan B22).
+#
+# Carries the HTTP adapter, the application layer and the domain. No PyTorch
+# and no NeuralForecast: DeepAR trains and serves out of its own images
+# (B23, B24), so putting a GPU stack in here would multiply the image size of
+# the service that answers every request for a model it never runs.
+#
+# StatsForecast and NumPy are here. `pyproject.toml` declares them as runtime
+# dependencies and the registry ships the StatsForecast adapters, so the
+# install below brings them in; the baselines and SBA remain pure Python.
+# Whether they stay is open: Route A's plan B keeps the StatsForecast models
+# out of policy v1 and records the dependency as a discrepancy for the two
+# routes to settle (docs/route-a/criteria.md, annex B). Dropping it means
+# removing the adapters and the dependency together, not editing this comment.
+#
+# Known limitation: most declared dependencies are lower bounds
+# (`fastapi>=0.115`), so two builds a month apart can resolve differently.
+# That is fine for development and not fine for production; the fix is a lock
+# file. `uv` is not used in this project, so that means `pip-tools` or no lock
+# at all, and the choice belongs to whoever owns deployment.
+
+FROM python:3.12-slim
+
+# No .pyc written into a layer nobody reuses, and unbuffered output so that
+# logs reach the orchestrator as they happen instead of when a buffer fills.
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# Dependencies first, in their own layer, so that editing the service does not
+# reinstall them.
+#
+# The list is read out of pyproject.toml rather than copied into a
+# requirements.txt: one source of truth, and no build backend is needed,
+# because this is a service to run rather than a library to install.
+COPY pyproject.toml ./
+RUN python -c "import tomllib; print(chr(10).join(tomllib.load(open('pyproject.toml','rb'))['project']['dependencies']))" > requirements.txt \
+    && pip install --no-cache-dir -r requirements.txt \
+    && rm requirements.txt
+
+COPY pango_prediction ./pango_prediction
+COPY config ./config
+
+# An unprivileged user: a compromise in the service should not own the
+# filesystem it runs on.
+RUN useradd --create-home --uid 10001 pango
+USER pango
+
+EXPOSE 8000
+
+# `python -c` rather than curl, which a slim image does not carry and which
+# would be a package installed only to ask a question Python can already ask.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"
+
+# There is no module-level `app` on purpose (see `main.py`), so uvicorn is
+# pointed at the factory. Without PANGO_PREDICTION_SERVICE_TOKEN the factory
+# raises and the container exits at once, which is the intended failure: a
+# prediction service with no credential would answer any caller.
+CMD ["uvicorn", "pango_prediction.main:create_app", "--factory", \
+     "--host", "0.0.0.0", "--port", "8000"]

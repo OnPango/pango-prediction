@@ -1,0 +1,13 @@
+{
+ "sha_freeze": "6a7f43c25ba78541685e21f5651a0883b1b4303571a4bf8afea4f5b62cf3b3bd",
+ "carpeta": "salidas/corrida_unica/2026-11-16_105016_6a7f43c25ba78541",
+ "estado": "terminado",
+ "momento": "2026-11-16T10:53:32",
+ "archivos": {
+  "pares_sin_historia_al_corte.parquet": "8e5074b640e86fd280c91ab0956c827b4852d0392a7080079cfc9ef7de6987f0",
+  "resultado.json": "3e91ef415a9a2ff63c055c8c2a5e0765dd44d062f5c501fce9a612f9ed793d67",
+  "series_bloque_bodega.parquet": "77b6d28998a3cf5587a422e930cc483b652c1e1cf196a201035e085b616555b8",
+  "series_bloque_producto.parquet": "d972c8e95908482259a484e18629d2b049fc8398201ecee5241315eb9134c716",
+  "series_bloque_top_down.parquet": "5a1b11a7c123248dfa4c31e4b0e9cd83faab9c817a4c20abd53f61167a8a1ffc"
+ }
+}

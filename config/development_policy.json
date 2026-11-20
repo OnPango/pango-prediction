@@ -1,0 +1,49 @@
+{
+  "policy_version": "development-1",
+  "frequency": "WEEKLY",
+  "horizon": 4,
+  "params_version": "f5f416da285217b5",
+  "rules": [
+    {
+      "when": {
+        "inactive": true
+      },
+      "reason": "inactive"
+    },
+    {
+      "when": {
+        "evaluable": false
+      }
+    },
+    {
+      "when": {
+        "demand_class": "SMOOTH"
+      },
+      "model": "naive"
+    },
+    {
+      "when": {
+        "demand_class": "ERRATIC"
+      },
+      "model": "moving_average",
+      "params": {
+        "window": 4
+      }
+    },
+    {
+      "when": {
+        "demand_class": "INTERMITTENT"
+      },
+      "model": "zero"
+    },
+    {
+      "when": {
+        "demand_class": "LUMPY"
+      },
+      "model": "zero"
+    }
+  ],
+  "default": {
+    "model": "naive"
+  }
+}

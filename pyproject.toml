@@ -1,0 +1,61 @@
+[project]
+name = "pango-prediction"
+version = "0.1.0"
+description = "Prediction service for PANGO"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # fastapi, pydantic and uvicorn are used by the inbound HTTP adapter only;
+    # numpy and statsforecast by the outbound StatsForecast adapter only. The
+    # domain, application and ports layers must stay importable without any of
+    # them installed.
+    "fastapi>=0.115",
+    "numpy>=2.0",
+    "pydantic>=2.9",
+    "statsforecast==2.1.1",
+    "uvicorn[standard]>=0.30",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28",
+    "mypy>=2.4",
+    "pytest>=9.2",
+    "pytest-cov>=7.1",
+    "ruff>=0.17",
+]
+deepar = [
+    "neuralforecast>=3.0,<4.0",
+    "pandas>=2.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The two `-p no:` switches keep pytest from auto-loading the plugins that
+# arrive with StatsForecast, through its `fugue` dependency. This project uses
+# neither, and loading them imports pyarrow, whose DLLs Windows Application
+# Control may block: the run then dies before collecting a single test.
+addopts = "-q -p no:fugue_test -p no:fugue_test_fixtures"
+# The project is not installed into the environment, so the repository root has
+# to be on sys.path. Without this, the `pytest` entry point fails to import
+# `pango_prediction` and only `python -m pytest` works.
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# Route A research notebooks are reference artifacts, not service code: they are
+# written in Colab and are not meant to follow this service's lint rules.
+extend-exclude = ["docs/*.ipynb"]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "UP",
+    "B",
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
