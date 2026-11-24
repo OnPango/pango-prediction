@@ -1,0 +1,44 @@
+{
+  "commit": "1ceb92b2826e3337c1e3427a87f7fa3dfc5c26d3",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "python": "3.12.10",
+  "scope": "local TestClient, repeated fixture, no network or persistence",
+  "results": [
+    {
+      "series": 1,
+      "warmups": 3,
+      "measured_runs": 20,
+      "failed_runs_including_warmups": 0,
+      "median_ms": 2.8901000041514635,
+      "p95_ms": 3.6021999549120665,
+      "series_per_second": 331.6881600943901,
+      "policy_versions": [
+        "development-1"
+      ]
+    },
+    {
+      "series": 10,
+      "warmups": 3,
+      "measured_runs": 20,
+      "failed_runs_including_warmups": 0,
+      "median_ms": 6.163700018078089,
+      "p95_ms": 6.94740004837513,
+      "series_per_second": 1604.800274779769,
+      "policy_versions": [
+        "development-1"
+      ]
+    },
+    {
+      "series": 100,
+      "warmups": 3,
+      "measured_runs": 20,
+      "failed_runs_including_warmups": 0,
+      "median_ms": 36.61680000368506,
+      "p95_ms": 70.8953000139445,
+      "series_per_second": 2179.1171071064855,
+      "policy_versions": [
+        "development-1"
+      ]
+    }
+  ]
+}
