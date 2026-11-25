@@ -110,6 +110,14 @@ Core debe declarar contrato **`1.2`** para recibir `no_forecast` y enviar
 `warehouses[]` con `warehouse_id` y `holds_stock`: un almacén omitido se trata
 como de stock. Consulta el [contrato HTTP](docs/contract-v1.md) para los detalles.
 
+Para ver el error de la policy por serie desde la primera corrida, añade
+`$payload | Add-Member include_validation $true` antes de `ConvertTo-Json`. Cada
+resultado trae entonces un bloque `validation`: el servicio separa las últimas
+cuatro semanas completas de la historia, las pronostica con las anteriores y las
+compara con lo real, con la convención de Ruta A (`error = pronóstico − real`).
+Sin ese campo, la respuesta no cambia. El contrato lo detalla en la sección 14,
+"The validation block".
+
 ## Docker
 
 Requiere Docker activo. Con el token ya exportado en la terminal:

@@ -130,6 +130,16 @@ class ForecastRequest(_Schema):
             "its series say so in a warning"
         ),
     )
+    include_validation: bool = Field(
+        default=False,
+        # Strict, so "true", 1 or "yes" are refused rather than read as true.
+        strict=True,
+        description=(
+            "Opt-in. When true, every result carries a validation block: the "
+            "last complete weeks of the history, forecast from the weeks "
+            "before them and scored with Route A's series-block convention"
+        ),
+    )
     series: Annotated[list[SeriesRequest], Field(min_length=1)]
 
     @field_validator("warehouses")
@@ -263,6 +273,81 @@ class ProfileResponse(_Schema):
     evaluable: bool
 
 
+def _absent(value: object) -> bool:
+    """Leave a field out of the JSON, rather than writing it as null."""
+    return value is None
+
+
+class ValidationWeekResponse(_Schema):
+    """One held-out week: what happened, and what had been forecast for it."""
+
+    period_start: date
+    actual: float
+    availability: Literal["AVAILABLE", "CENSORED", "OUT_OF_ASSORTMENT", "UNKNOWN"]
+    evaluable: bool = Field(
+        description="False for CENSORED and OUT_OF_ASSORTMENT: left out of the error"
+    )
+    estimate: float | None = Field(
+        description="The point forecast; 0 when counted_as_zero; null if not scored"
+    )
+    lower: float | None
+    upper: float | None
+
+
+class ValidationMetricsResponse(_Schema):
+    """Route A's series-block metrics (criteria §1.3, §1.7).
+
+    To aggregate several series, sum the components and divide: WAPE is the sum
+    of absolute_error over the sum of actual_total, and bias the sum of error
+    over the sum of actual_total. Averaging the per-series ratios is not
+    Route A's metric.
+    """
+
+    evaluable_weeks: int
+    actual_total: float = Field(description="Actual demand over the evaluable weeks")
+    forecast_total: float = Field(description="Point forecast over the same weeks")
+    error: float = Field(
+        description="forecast_total - actual_total: positive means over-forecast"
+    )
+    absolute_error: float
+    wape: float | None = Field(description="absolute_error / actual_total")
+    bias: float | None = Field(
+        description="error / actual_total: positive means over-forecast"
+    )
+    weekly_coverage: float | None = Field(
+        description="Share of evaluable weeks inside the weekly interval"
+    )
+    total_inside_interval: bool | None = Field(
+        description="Only measured when every held-out week is evaluable"
+    )
+
+
+class ValidationResponse(_Schema):
+    """How the policy did on the series' last complete weeks."""
+
+    convention: Literal["route_a_series_block"]
+    status: Literal["evaluated", "not_evaluated"]
+    reason: str | None = Field(description="Why the series was not evaluated")
+    train_end: date = Field(description="The holdout forecast used history up to here")
+    forecast_status: Literal["ok", "no_forecast", "error"] = Field(
+        description="What the policy decided at train_end, whatever contract version"
+    )
+    forecast_reason: str | None = Field(description="Set with forecast_status no_forecast")
+    forecast_error: SeriesErrorResponse | None
+    model_name: str | None
+    counted_as_zero: bool = Field(
+        description=(
+            "Scored as a zero forecast because the policy declined the series "
+            "or its model refused it for too little history (Route A DEC-1)"
+        )
+    )
+    weeks: list[ValidationWeekResponse]
+    total: TotalResponse | None = Field(
+        description="The holdout forecast's horizon-total interval"
+    )
+    metrics: ValidationMetricsResponse | None
+
+
 class SeriesResultResponse(_Schema):
     series_id: int
     status: Literal["ok", "error", "no_forecast"] = Field(
@@ -282,6 +367,13 @@ class SeriesResultResponse(_Schema):
     horizon_business_days: list[float] = Field(
         default_factory=list,
         description="Equivalent business days of each week being forecast",
+    )
+    validation: ValidationResponse | None = Field(
+        default=None,
+        # Omitted, not null, unless requested: a client that does not ask for
+        # it receives exactly the envelope it received before it existed.
+        exclude_if=_absent,
+        description="Present only when the request sets include_validation",
     )
 
 

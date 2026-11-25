@@ -112,6 +112,10 @@ Everything 1.1 added was an extra field, so a 1.0 client that ignores response f
 
 The two request fields are optional and are accepted whatever version the request declares. Only the status they lead to follows the version, like every declined series.
 
+### Opt-in validation, within 1.2
+
+`include_validation` (section 7) and the `validation` block it adds (section 14) did not raise the version. A client only receives the block by asking for it, so no client can be surprised by it, and a client that does not ask receives the same bytes as before. Raising the served version would instead have changed `contract_version` in every response, including those of clients that never use the block. The field is accepted whatever version the request declares.
+
 ### What changed in 1.1
 
 | Change | Where |
@@ -246,6 +250,12 @@ Content-Type: application/json
   - The same `warehouse_id` twice is refused with `422`.
   - A warehouse with no series in the request is ignored, so the whole
     configuration can be sent with every batch.
+- `include_validation`: optional JSON boolean, `false` by default. When `true`,
+  every result carries a `validation` block: the policy's score on the last
+  complete weeks of the history sent (section 14, "The validation block"). Any
+  value other than `true` or `false`, such as `"true"` or `1`, is refused with
+  `422`. When it is absent or `false`, the response is exactly what it was
+  before the block existed.
 - `series`: required array of product-warehouse series.
 
 No observation after `history_end` may be used.
@@ -939,6 +949,13 @@ When the observable actual total is zero, WAPE and Bias are `null`. When MASE
 does not have enough history or has a zero scale, it is `null`. Pango Core
 persists the request facts and the returned metrics; Prediction calculates the
 official values.
+
+These conventions are not Route A's. Here errors are weekly and signed
+`actual - estimate`, so a positive bias means under-forecast; the validation
+block of section 14 follows Route A, with one error per block and `f - y`, so a
+positive bias there means over-forecast. Reconciling the two with Route A is
+pending. Until then, a figure from one must not be compared with, or averaged
+into, a figure from the other.
 
 ## 20. Batching
 

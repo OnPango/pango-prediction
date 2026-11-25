@@ -38,6 +38,9 @@ from pango_prediction.adapters.inbound.api.schemas import (
     SeriesResultResponse,
     SummaryResponse,
     TotalResponse,
+    ValidationMetricsResponse,
+    ValidationResponse,
+    ValidationWeekResponse,
 )
 from pango_prediction.application.errors import (
     HorizonMismatchError,
@@ -47,6 +50,10 @@ from pango_prediction.application.forecast_service import (
     ForecastCommand,
     ForecastService,
     SeriesOutcome,
+)
+from pango_prediction.application.validation import (
+    HoldoutValidation,
+    SeriesValidation,
 )
 from pango_prediction.config import (
     CONTRACT_VERSION,
@@ -187,11 +194,86 @@ def served_contract_version(declared: str) -> str:
     return CONTRACT_VERSION
 
 
+def _status_of(outcome: SeriesOutcome) -> Literal["ok", "error", "no_forecast"]:
+    if outcome.error is not None:
+        return "error"
+    if outcome.no_forecast is not None:
+        return "no_forecast"
+    return "ok"
+
+
+def to_validation(validation: SeriesValidation) -> ValidationResponse:
+    """Render a holdout validation.
+
+    The block is new and only sent to a client that asks for it, so its
+    ``forecast_status`` uses the full vocabulary whatever contract version the
+    request declared: a client that opts in has read the section describing it.
+    """
+    forecast = validation.forecast
+    metrics = validation.metrics
+
+    return ValidationResponse(
+        convention="route_a_series_block",
+        status="evaluated" if metrics is not None else "not_evaluated",
+        reason=None if validation.skipped is None else validation.skipped.value,
+        train_end=validation.train_end,
+        forecast_status=_status_of(forecast),
+        forecast_reason=None if forecast.no_forecast is None else forecast.no_forecast.value,
+        forecast_error=(
+            None
+            if forecast.error is None
+            else SeriesErrorResponse(
+                code=forecast.error.code.value,
+                message=forecast.error.message,
+            )
+        ),
+        model_name=forecast.model_name,
+        counted_as_zero=validation.counted_as_zero,
+        weeks=[
+            ValidationWeekResponse(
+                period_start=week.period_start,
+                actual=week.actual,
+                availability=week.availability.value,
+                evaluable=week.observable,
+                estimate=week.estimate,
+                lower=week.lower,
+                upper=week.upper,
+            )
+            for week in validation.weeks
+        ],
+        total=(
+            None
+            if forecast.total is None
+            else TotalResponse(
+                estimate=forecast.total.estimate,
+                lower=forecast.total.lower,
+                upper=forecast.total.upper,
+            )
+        ),
+        metrics=(
+            None
+            if metrics is None
+            else ValidationMetricsResponse(
+                evaluable_weeks=metrics.evaluable_weeks,
+                actual_total=metrics.actual_total,
+                forecast_total=metrics.forecast_total,
+                error=metrics.error,
+                absolute_error=metrics.absolute_error,
+                wape=metrics.wape,
+                bias=metrics.bias,
+                weekly_coverage=metrics.weekly_coverage,
+                total_inside_interval=metrics.total_inside_interval,
+            )
+        ),
+    )
+
+
 def to_series_result(
     series_id: int,
     outcome: SeriesOutcome,
     *,
     knows_no_forecast: bool,
+    validation: SeriesValidation | None = None,
 ) -> SeriesResultResponse:
     """Render one outcome in the envelope the client understands.
 
@@ -256,11 +338,15 @@ def to_series_result(
         profile=(None if outcome.profile is None else to_profile(outcome.profile)),
         horizon_business_days=list(outcome.horizon_business_days),
         error=error,
+        validation=None if validation is None else to_validation(validation),
     )
 
 
 def build_router(settings: Settings, service: ForecastService) -> APIRouter:
     router = APIRouter()
+    # Built from the same service, so the validation runs the production
+    # pipeline and cannot drift from it.
+    holdout = HoldoutValidation(service)
 
     def require_service_token(
         authorization: Annotated[str | None, Header()] = None,
@@ -315,9 +401,15 @@ def build_router(settings: Settings, service: ForecastService) -> APIRouter:
             )
 
         started = time.perf_counter()
+        command = to_command(request)
 
         try:
-            batch = service.run(to_command(request))
+            batch = service.run(command)
+            validations = (
+                holdout.run(command)
+                if request.include_validation
+                else (None,) * len(batch.outcomes)
+            )
         except HorizonMismatchError as error:
             raise horizon_mismatch(str(error)) from error
 
@@ -330,8 +422,11 @@ def build_router(settings: Settings, service: ForecastService) -> APIRouter:
                 series.series_id,
                 outcome,
                 knows_no_forecast=contract_version != LEGACY_CONTRACT_VERSION,
+                validation=validation,
             )
-            for series, outcome in zip(request.series, batch.outcomes, strict=True)
+            for series, outcome, validation in zip(
+                request.series, batch.outcomes, validations, strict=True
+            )
         ]
 
         # Counted from what was rendered, not from the batch, so the summary
