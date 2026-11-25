@@ -456,15 +456,18 @@ The feature is known into the future by construction, since it reads only the da
 
 ## 14. Forecast response
 
-Captured from the running service, not written by hand. The development policy
-routes series 1198 to the `naive` baseline; series 1500 sent a negative
-quantity and could not be processed.
+The envelope below illustrates the contract shape. In the model-selection
+branch, the service does not load a policy: it compares `zero`, `naive`,
+`moving_average(window=4)` and SBA using rolling-origin history, then reports
+the winner in `model_name`.
+`policy_version` remains in the response for compatibility and is `null`.
+Series 1500 sent a negative quantity and could not be processed.
 
 ```json
 {
   "contract_version": "1.2",
   "service_version": "0.1.0",
-  "policy_version": "development-1",
+  "policy_version": null,
   "request_id": "req-2026-11-02-0001",
   "forecast_run_id": 41,
   "summary": {
@@ -510,7 +513,7 @@ quantity and could not be processed.
         "upper": 18.0
       },
       "model_name": "naive",
-      "model_version": "development",
+      "model_version": "rolling-origin-average-rank-v1",
       "warnings": [
         "The series is sold to order, so zero stock was not read as a stockout."
       ],
@@ -569,7 +572,7 @@ produce a forecast.
 | `status` | Meaning | What accompanies it |
 |---|---|---|
 | `ok` | The series was forecast | `periods`, `total`, `model_name`, `model_version` |
-| `no_forecast` | The policy declined the series on purpose. Nothing failed | `reason`; `periods` is empty and `total` is `null` |
+| `no_forecast` | A request-level rule declined the series. Nothing failed | `reason`; `periods` is empty and `total` is `null` |
 | `error` | Something prevented a forecast | `error.code` and `error.message` |
 
 `profile`, `warnings` and `horizon_business_days` travel with all three whenever the series got far enough.
@@ -651,7 +654,9 @@ A series in a warehouse that holds no stock, for a request declaring `1.2`:
 }
 ```
 
-History insufficiency is **not** a `no_forecast`. A series with too little observable history still comes back as an `error`, and stays one until a policy rule routes it with a reason of its own.
+History insufficiency is **not** a `no_forecast`. A series with too little
+observable history still comes back as an `error`; internal model selection
+requires enough history to build at least two validation folds.
 
 ### The profile block
 
@@ -671,87 +676,17 @@ The monthly and the weekly counts disagree on purpose: classification happens mo
 
 **This replaces 1.0's profile block**, which had `observed_periods`, `nonzero_periods` and `short_history`. Those conflated the two grains into one pair of counters and reduced three history classes to a boolean. The `demand_class` values are also upper case, matching Route A's enum.
 
-### The validation block
+### Model selection in this branch
 
-Only present when the request sets `include_validation: true`. It answers "how well does the deployed policy forecast this series?" from the first run, before any forecast's own horizon has closed.
-
-**Method.** The last `horizon` complete weeks of the history sent are held out. The service cuts the history at `train_end`, the Sunday before them, and runs the unchanged forecast pipeline on what remains: series, availability, profile, policy and model, all recomputed from data up to `train_end`. It then compares that forecast with what happened in the held-out weeks. A trailing partial week is not held out, as it is not forecast.
-
-**Labels.** Each held-out week is labelled by the service's own availability rules (section 11), applied to the history up to the end of the held-out weeks. `CENSORED` and `OUT_OF_ASSORTMENT` weeks have `evaluable: false` and leave the error; `AVAILABLE` and `UNKNOWN` weeks are evaluable, as in Route A's evaluation. A known limitation: weeks after a series' last sale read as inactivity, so a stockout that covers the end of the held-out weeks is scored as zero demand.
-
-**Score.** Route A's series-block convention (`docs/route-a/criteria.md` §1.3, §1.7), named by `"convention": "route_a_series_block"`:
-
-| Field | Meaning |
-|---|---|
-| `actual_total` (y) | Actual demand summed over the evaluable weeks |
-| `forecast_total` (f) | Point forecast summed over the same weeks |
-| `error` | `f - y`. **Positive means over-forecast** |
-| `absolute_error` | `abs(f - y)` |
-| `wape` | `abs(f - y) / y`; `null` when y is 0 |
-| `bias` | `(f - y) / y`; `null` when y is 0. Positive means over-forecast |
-| `weekly_coverage` | Share of evaluable weeks inside their weekly interval; `null` without an interval |
-| `total_inside_interval` | Whether y lies inside the horizon-total interval; only measured when every held-out week is evaluable, otherwise `null` |
-
-To aggregate several series, sum the components and divide: WAPE is the sum of `absolute_error` over the sum of `actual_total`, bias the sum of `error` over the sum of `actual_total`. An average of the per-series ratios is not Route A's metric.
-
-**Which series are scored.**
-
-| Case | `status` | `counted_as_zero` | `reason` |
-|---|---|---|---|
-| The policy forecast the series at `train_end` | `evaluated` | `false` | `null` |
-| The policy declined it at `train_end` (for example `inactive`), or its model refused a short history | `evaluated` | `true`: scored as f = 0, as Route A did (DEC-1) | `null` |
-| `history_only`, or a warehouse with `holds_stock: false` | `not_evaluated` | `false` | `declined_by_request` |
-| No sale before `train_end` | `not_evaluated` | `false` | `no_history_at_cutoff` |
-| Any other failure at `train_end`, such as invalid data | `not_evaluated` | `false` | `forecast_failed` |
-| The held-out weeks themselves cannot be built from the data | `not_evaluated` | `false` | `invalid_series` |
-| Fewer than two evaluable held-out weeks | `not_evaluated` | per the rows above | `too_few_evaluable_weeks` |
-
-`forecast_status`, `forecast_reason`, `forecast_error` and `model_name` describe what the policy decided at `train_end`. They use the full vocabulary whatever version the request declared: the block is opt-in, so a client that asks for it reads this section. `weeks` lists the held-out weeks whenever they can be built, even when the series is not scored, so a client can show why.
-
-Captured from the running service with the delivered Route A policy, for series 1042 of `tests/fixtures/forecast_request.json`:
-
-```json
-"validation": {
-  "convention": "route_a_series_block",
-  "status": "evaluated",
-  "reason": null,
-  "train_end": "2026-10-04",
-  "forecast_status": "ok",
-  "forecast_reason": null,
-  "forecast_error": null,
-  "model_name": "moving_average",
-  "counted_as_zero": false,
-  "weeks": [
-    {"period_start": "2026-10-05", "actual": 3.0, "availability": "AVAILABLE", "evaluable": true, "estimate": 3.25, "lower": 0.0, "upper": 5.475},
-    {"period_start": "2026-10-12", "actual": 4.0, "availability": "AVAILABLE", "evaluable": true, "estimate": 3.25, "lower": 0.0, "upper": 5.475},
-    {"period_start": "2026-10-19", "actual": 4.0, "availability": "AVAILABLE", "evaluable": true, "estimate": 3.25, "lower": 0.0, "upper": 5.475},
-    {"period_start": "2026-10-26", "actual": 3.0, "availability": "AVAILABLE", "evaluable": true, "estimate": 3.25, "lower": 0.0, "upper": 5.475}
-  ],
-  "total": {"estimate": 13.0, "lower": 5.6, "upper": 17.8},
-  "metrics": {
-    "evaluable_weeks": 4,
-    "actual_total": 14.0,
-    "forecast_total": 13.0,
-    "error": -1.0,
-    "absolute_error": 1.0,
-    "wape": 0.07142857142857142,
-    "bias": -0.07142857142857142,
-    "weekly_coverage": 1.0,
-    "total_inside_interval": true
-  }
-}
-```
-
-The block is a diagnostic of the policy on the series' recent past. It does not change the forecast returned for the weeks ahead, it is not a guarantee for them, and `1 - wape` is not an accuracy percentage. It also differs on purpose from section 19, which scores a stored forecast week by week with `actual - estimate`: the two must not be mixed in one figure.
-
-### Not yet populated
-
-With the development policy, successful series include four `periods`,
-`model_name`, `model_version` and `policy_version`. Route A can replace the
-development artifact without changing the HTTP envelope. Series that are not
-evaluable or have no applicable policy continue to return an empty `periods`
-array and a stable per-series error. Series the policy declines return
-`no_forecast` to a 1.2 client, as described above.
+Successful series include four `periods`, the selected `model_name` and
+`model_version` (`rolling-origin-average-rank-v1`). The service compares
+`zero`, `naive`, `moving_average(window=4)` and SBA over two recent,
+expanding-origin folds using WAPE, absolute bias, MAE and MASE; the lowest
+average rank wins. It returns
+`INSUFFICIENT_HISTORY` if it cannot form at least two evaluable folds.
+`policy_version` is `null`. This is an experimental selection strategy, not a
+replacement for the frozen Route A evaluation; real historical evaluation data
+is not included in this repository.
 
 ## 15. DeepAR metadata
 
@@ -775,10 +710,12 @@ When DeepAR is selected:
 
 A checkpoint trained for one organization must not automatically be applied to another.
 
-## 15.1 Development policy artifact
+## 15.1 Historical development policy artifact
 
-Until Route A publishes the evaluated production policy, Route B may load a
-development policy with this shape:
+The policy schema and artifact are retained for historical Route A and
+application tests. The model-selection branch does not load this file at
+startup; it selects from registered models using rolling-origin evaluation.
+The former development policy had this shape:
 
 ```json
 {
@@ -876,10 +813,11 @@ Do not reuse a request identifier for a different batch. A split batch gives
 each request its own identifier, while a retry of one split uses that same
 identifier.
 
-Pango Core should persist `policy_version` from the response envelope and
-`model_name`/`model_version` from each successful series. These values are
-required for later auditability even though the current tenant schema may need
-new columns for them.
+Pango Core should persist `model_name`/`model_version` from each successful
+series. The response retains `policy_version` for compatibility; it is `null`
+when the service uses internal model selection. These values support later
+auditability even though the current tenant schema may need new columns for
+them.
 
 ## 19. Forecast evaluation
 

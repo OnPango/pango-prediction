@@ -42,7 +42,6 @@ RUN python -c "import tomllib; print(chr(10).join(tomllib.load(open('pyproject.t
     && rm requirements.txt
 
 COPY pango_prediction ./pango_prediction
-COPY config ./config
 
 # An unprivileged user: a compromise in the service should not own the
 # filesystem it runs on.

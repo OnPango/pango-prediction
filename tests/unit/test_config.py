@@ -5,7 +5,6 @@ import pytest
 from pango_prediction.config import (
     DEFAULT_MAX_SERIES_PER_REQUEST,
     MAX_SERIES_ENV,
-    POLICY_PATH_ENV,
     SERVICE_TOKEN_ENV,
     load_settings,
 )
@@ -15,18 +14,6 @@ def test_a_missing_service_token_refuses_to_load() -> None:
     """A service deployed without a credential would accept any caller."""
     with pytest.raises(RuntimeError, match=SERVICE_TOKEN_ENV):
         load_settings(env={})
-
-
-@pytest.mark.parametrize("raw", ["", "   "])
-def test_blank_policy_path_keeps_development_default(raw: str) -> None:
-    assert load_settings({SERVICE_TOKEN_ENV: "token", POLICY_PATH_ENV: raw}).policy_path is None
-
-
-def test_policy_path_is_read_and_stripped() -> None:
-    settings = load_settings(
-        {SERVICE_TOKEN_ENV: "token", POLICY_PATH_ENV: " config/model_policy.json "}
-    )
-    assert settings.policy_path == "config/model_policy.json"
 
 
 def test_a_blank_service_token_refuses_to_load() -> None:

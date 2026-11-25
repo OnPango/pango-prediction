@@ -39,16 +39,11 @@ def load_fixture(name: str) -> dict[str, Any]:
 
 
 def declined_request(contract_version: str) -> dict[str, Any]:
-    """The minimal fixture with its one series turned dormant.
-
-    A single sale almost two years before the cutoff makes the series inactive,
-    which the development policy declines with the reason `inactive`.
-    """
+    """The fixture explicitly marks its series as history-only."""
     payload = load_fixture("forecast_request_minimal.json")
     payload["contract_version"] = contract_version
     series = payload["series"][0]
-    series["demand"] = [{"date": "2025-01-08", "quantity": 5}]
-    series["stock"] = []
+    series["history_only"] = True
 
     return payload
 
@@ -65,7 +60,7 @@ def test_a_declined_series_has_its_own_status_from_contract_1_2(
 
     assert body["contract_version"] == "1.2"
     assert result["status"] == "no_forecast"
-    assert result["reason"] == "inactive"
+    assert result["reason"] == "history_only"
     assert result["error"] is None
     assert result["periods"] == []
     assert result["total"] is None
@@ -78,8 +73,9 @@ def test_a_declined_series_still_carries_its_profile(client: TestClient) -> None
 
     result = response.json()["results"][0]
 
-    assert result["profile"]["inactive"] is True
-    assert result["warnings"]
+    assert result["profile"]["history_weeks"] == 22
+    assert result["profile"]["evaluable"] is True
+    assert result["warnings"] == []
     assert len(result["horizon_business_days"]) == 4
 
 
@@ -99,7 +95,7 @@ def test_an_older_client_keeps_receiving_the_error_it_knows(
     assert body["contract_version"] == "1.1"
     assert result["status"] == "error"
     assert result["error"]["code"] == "MODEL_NOT_AVAILABLE"
-    assert "inactive" in result["error"]["message"]
+    assert "history_only" in result["error"]["message"]
     assert result["reason"] is None
     assert body["summary"] == {"total": 1, "ok": 0, "error": 1, "no_forecast": 0}
 

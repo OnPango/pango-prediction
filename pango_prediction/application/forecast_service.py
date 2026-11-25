@@ -6,20 +6,21 @@ series' outcome is.
 
 The intended full flow (plan B13) is:
 
-    input -> series -> availability -> calendar -> profile -> policy -> model
+    input -> series -> availability -> calendar -> profile -> model comparison -> model
 
-The policy and model registry are injected so this use case can execute the
-same domain pipeline with a development policy today and Route A's evaluated
-policy later.
+The production composition uses rolling-origin model comparison against the
+registered local candidates. An explicitly supplied policy remains available
+to isolated compatibility tests, but the HTTP application does not load one.
 
-A series has one of three outcomes: a forecast, a decision by the policy not
-to forecast it, or a failure. The second is not an error and is reported apart.
+A series has one of three outcomes: a forecast, a rule-based decision not to
+forecast it, or a failure. The second is not an error and is reported apart.
 
 One series failing never fails the batch (plan B17). The one thing that does
 refuse a whole command is a horizon the policy was not calibrated for, which
 is a fault of the request and not of any series.
 """
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
@@ -28,6 +29,11 @@ from typing import cast
 from pango_prediction.application.errors import (
     HorizonMismatchError,
     SeriesErrorCode,
+)
+from pango_prediction.application.model_selection import (
+    InsufficientBacktestHistoryError,
+    ModelSelectionError,
+    select_model,
 )
 from pango_prediction.domain.availability import build_weekly_availability
 from pango_prediction.domain.calendar import ClosedDates, weekly_business_days
@@ -55,6 +61,8 @@ from pango_prediction.ports.model import (
     ModelUnavailableError,
 )
 from pango_prediction.ports.registry import ModelNotRegisteredError, ModelRegistry
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,18 +118,17 @@ class SeriesError:
 class SeriesOutcome:
     """What happened to one series: a forecast, a decision not to, or a failure.
 
-    Exactly one of the three holds. ``no_forecast`` is the policy declining the
+    Exactly one of the three holds. ``no_forecast`` is a rule declining the
     series on purpose, with its reason; ``error`` is something going wrong.
-    They are kept apart here whatever the caller is able to understand, and
-    rendering a declined series for a client that only knows two statuses is
-    the inbound adapter's concern, not this one's.
+    Request-level exclusions remain distinct from model-comparison failures,
+    and rendering the outcome for a client is the inbound adapter's concern.
     """
 
     series_id: str
     warnings: tuple[str, ...] = ()
     error: SeriesError | None = None
     no_forecast: NoForecastReason | None = None
-    """Why the policy declined the series. None when it did not."""
+    """Why a rule declined the series. None when it did not."""
     profile: DemandProfile | None = None
     """What the series' demand behaves like. None only when it never got that
     far, so a profile and an error can and do travel together."""
@@ -174,10 +181,10 @@ class ForecastService:
     def run(self, command: ForecastCommand) -> ForecastResultBatch:
         """Forecast every series of the command.
 
-        Raises `HorizonMismatchError` before touching any series when the
-        command's horizon is not the one the loaded policy declares. Without a
-        policy there is nothing to disagree with: no model runs, and each
-        series reports MODEL_NOT_AVAILABLE on its own.
+        Raises `HorizonMismatchError` before touching any series when an
+        explicitly supplied policy does not cover the requested horizon.
+        Without a policy, the registered candidate models are compared using
+        the same horizon in rolling-origin folds.
         """
         if self._policy is not None and command.horizon != self._policy.horizon:
             raise HorizonMismatchError(
@@ -276,65 +283,104 @@ class ForecastService:
             )
 
         if self._policy is None:
-            return SeriesOutcome(
-                series_id=series.series_id,
-                warnings=warnings,
-                profile=profile,
-                horizon_business_days=horizon_business_days,
-                error=SeriesError(
-                    code=SeriesErrorCode.MODEL_NOT_AVAILABLE,
-                    message="No model policy is loaded.",
-                ),
+            try:
+                selected = select_model(
+                    series,
+                    regularized,
+                    horizon=command.horizon,
+                    registry=self._registry,
+                    parameters=command.parameters,
+                )
+            except InsufficientBacktestHistoryError as error:
+                return SeriesOutcome(
+                    series_id=series.series_id,
+                    warnings=warnings,
+                    profile=profile,
+                    horizon_business_days=horizon_business_days,
+                    error=SeriesError(
+                        code=SeriesErrorCode.INSUFFICIENT_HISTORY,
+                        message=str(error),
+                    ),
+                )
+            except ModelSelectionError as error:
+                return SeriesOutcome(
+                    series_id=series.series_id,
+                    warnings=warnings,
+                    profile=profile,
+                    horizon_business_days=horizon_business_days,
+                    error=SeriesError(
+                        code=SeriesErrorCode.MODEL_NOT_AVAILABLE,
+                        message=str(error),
+                    ),
+                )
+
+            model_spec = selected.model
+            logger.debug(
+                "Internal model comparison selected=%s scores=%s excluded=%s",
+                selected.model.name,
+                [
+                    {
+                        "model": score.model.name,
+                        "wape": score.wape,
+                        "absolute_bias": (
+                            None if score.bias is None else abs(score.bias)
+                        ),
+                        "mae": score.mae,
+                        "mase": score.mase,
+                        "mean_rank": score.mean_rank,
+                    }
+                    for score in selected.scores
+                ],
+                selected.excluded_models,
             )
+        else:
+            try:
+                decision = self._policy.resolve(profile)
+            except PolicyError as error:
+                return SeriesOutcome(
+                    series_id=series.series_id,
+                    warnings=warnings,
+                    profile=profile,
+                    horizon_business_days=horizon_business_days,
+                    error=SeriesError(
+                        code=SeriesErrorCode.MODEL_NOT_AVAILABLE,
+                        message=str(error),
+                    ),
+                )
+
+            if decision.model is None and decision.reason is not None:
+                # The policy declined the series on purpose. That is an outcome of
+                # its own: nothing failed, and the profile and warnings are the
+                # whole of what there is to say.
+                return SeriesOutcome(
+                    series_id=series.series_id,
+                    warnings=warnings,
+                    profile=profile,
+                    horizon_business_days=horizon_business_days,
+                    no_forecast=decision.reason,
+                )
+
+            if decision.model is None:
+                return SeriesOutcome(
+                    series_id=series.series_id,
+                    warnings=warnings,
+                    profile=profile,
+                    horizon_business_days=horizon_business_days,
+                    error=SeriesError(
+                        code=SeriesErrorCode.MODEL_NOT_AVAILABLE,
+                        message="The policy selected no model.",
+                    ),
+                )
+
+            model_spec = decision.model
 
         try:
-            decision = self._policy.resolve(profile)
-        except PolicyError as error:
-            return SeriesOutcome(
-                series_id=series.series_id,
-                warnings=warnings,
-                profile=profile,
-                horizon_business_days=horizon_business_days,
-                error=SeriesError(
-                    code=SeriesErrorCode.MODEL_NOT_AVAILABLE,
-                    message=str(error),
-                ),
-            )
-
-        if decision.model is None and decision.reason is not None:
-            # The policy declined the series on purpose. That is an outcome of
-            # its own: nothing failed, and the profile and warnings are the
-            # whole of what there is to say.
-            return SeriesOutcome(
-                series_id=series.series_id,
-                warnings=warnings,
-                profile=profile,
-                horizon_business_days=horizon_business_days,
-                no_forecast=decision.reason,
-            )
-
-        if decision.model is None:
-            # No model and no reason: the policy has nothing for this series
-            # and does not say why, so it stays a missing model. This is the
-            # path history insufficiency travels until a rule gives it a reason.
-            return SeriesOutcome(
-                series_id=series.series_id,
-                warnings=warnings,
-                profile=profile,
-                horizon_business_days=horizon_business_days,
-                error=SeriesError(
-                    code=SeriesErrorCode.MODEL_NOT_AVAILABLE,
-                    message="The policy selected no model.",
-                ),
-            )
-
-        try:
-            model = self._registry.resolve(decision.model.name)
+            model = self._registry.resolve(model_spec.name)
             model_request = ModelRequest(
                 series=regularized,
                 availability=availability,
                 horizon=command.horizon,
-                params=decision.model.params,
+                params=model_spec.params,
             )
             periods = model.predict(model_request)
             if not hasattr(model, "predict_total"):
@@ -377,7 +423,11 @@ class ForecastService:
             periods=periods,
             total=total,
             model_name=model.name,
-            model_version="development",
+            model_version=(
+                "rolling-origin-average-rank-v1"
+                if self._policy is None
+                else "development"
+            ),
         )
 
     @staticmethod
