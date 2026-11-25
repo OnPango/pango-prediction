@@ -446,15 +446,18 @@ The feature is known into the future by construction, since it reads only the da
 
 ## 14. Forecast response
 
-Captured from the running service, not written by hand. The development policy
-routes series 1198 to the `naive` baseline; series 1500 sent a negative
-quantity and could not be processed.
+The envelope below illustrates the contract shape. In the model-selection
+branch, the service does not load a policy: it compares `zero`, `naive`,
+`moving_average(window=4)` and SBA using rolling-origin history, then reports
+the winner in `model_name`.
+`policy_version` remains in the response for compatibility and is `null`.
+Series 1500 sent a negative quantity and could not be processed.
 
 ```json
 {
   "contract_version": "1.2",
   "service_version": "0.1.0",
-  "policy_version": "development-1",
+  "policy_version": null,
   "request_id": "req-2026-11-02-0001",
   "forecast_run_id": 41,
   "summary": {
@@ -500,7 +503,7 @@ quantity and could not be processed.
         "upper": 18.0
       },
       "model_name": "naive",
-      "model_version": "development",
+      "model_version": "rolling-origin-average-rank-v1",
       "warnings": [
         "The series is sold to order, so zero stock was not read as a stockout."
       ],
@@ -559,7 +562,7 @@ produce a forecast.
 | `status` | Meaning | What accompanies it |
 |---|---|---|
 | `ok` | The series was forecast | `periods`, `total`, `model_name`, `model_version` |
-| `no_forecast` | The policy declined the series on purpose. Nothing failed | `reason`; `periods` is empty and `total` is `null` |
+| `no_forecast` | A request-level rule declined the series. Nothing failed | `reason`; `periods` is empty and `total` is `null` |
 | `error` | Something prevented a forecast | `error.code` and `error.message` |
 
 `profile`, `warnings` and `horizon_business_days` travel with all three whenever the series got far enough.
@@ -641,7 +644,9 @@ A series in a warehouse that holds no stock, for a request declaring `1.2`:
 }
 ```
 
-History insufficiency is **not** a `no_forecast`. A series with too little observable history still comes back as an `error`, and stays one until a policy rule routes it with a reason of its own.
+History insufficiency is **not** a `no_forecast`. A series with too little
+observable history still comes back as an `error`; internal model selection
+requires enough history to build at least two validation folds.
 
 ### The profile block
 
@@ -661,14 +666,17 @@ The monthly and the weekly counts disagree on purpose: classification happens mo
 
 **This replaces 1.0's profile block**, which had `observed_periods`, `nonzero_periods` and `short_history`. Those conflated the two grains into one pair of counters and reduced three history classes to a boolean. The `demand_class` values are also upper case, matching Route A's enum.
 
-### Not yet populated
+### Model selection in this branch
 
-With the development policy, successful series include four `periods`,
-`model_name`, `model_version` and `policy_version`. Route A can replace the
-development artifact without changing the HTTP envelope. Series that are not
-evaluable or have no applicable policy continue to return an empty `periods`
-array and a stable per-series error. Series the policy declines return
-`no_forecast` to a 1.2 client, as described above.
+Successful series include four `periods`, the selected `model_name` and
+`model_version` (`rolling-origin-average-rank-v1`). The service compares
+`zero`, `naive`, `moving_average(window=4)` and SBA over two recent,
+expanding-origin folds using WAPE, absolute bias, MAE and MASE; the lowest
+average rank wins. It returns
+`INSUFFICIENT_HISTORY` if it cannot form at least two evaluable folds.
+`policy_version` is `null`. This is an experimental selection strategy, not a
+replacement for the frozen Route A evaluation; real historical evaluation data
+is not included in this repository.
 
 ## 15. DeepAR metadata
 
@@ -692,10 +700,12 @@ When DeepAR is selected:
 
 A checkpoint trained for one organization must not automatically be applied to another.
 
-## 15.1 Development policy artifact
+## 15.1 Historical development policy artifact
 
-Until Route A publishes the evaluated production policy, Route B may load a
-development policy with this shape:
+The policy schema and artifact are retained for historical Route A and
+application tests. The model-selection branch does not load this file at
+startup; it selects from registered models using rolling-origin evaluation.
+The former development policy had this shape:
 
 ```json
 {
@@ -793,10 +803,11 @@ Do not reuse a request identifier for a different batch. A split batch gives
 each request its own identifier, while a retry of one split uses that same
 identifier.
 
-Pango Core should persist `policy_version` from the response envelope and
-`model_name`/`model_version` from each successful series. These values are
-required for later auditability even though the current tenant schema may need
-new columns for them.
+Pango Core should persist `model_name`/`model_version` from each successful
+series. The response retains `policy_version` for compatibility; it is `null`
+when the service uses internal model selection. These values support later
+auditability even though the current tenant schema may need new columns for
+them.
 
 ## 19. Forecast evaluation
 

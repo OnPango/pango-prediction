@@ -4,9 +4,10 @@ Servicio HTTP de pronóstico de demanda por **producto × almacén**
 (`series_id = product_warehouse_id`), con semanas de lunes a domingo y horizonte
 de **4 semanas**.
 
-**Ruta A evalúa y selecciona la policy; Ruta B (este repositorio) la ejecuta.**
-Pango Core envía demanda, stock y calendario, y persiste los resultados.
-El servicio no consulta la base de datos ni calcula alertas de inventario.
+Esta rama experimental de **Ruta B** compara modelos con backtesting temporal
+por serie y pronostica con el ganador. No carga una policy ni cambia el contrato
+con Pango Core. El servicio no consulta la base de datos ni calcula alertas de
+inventario.
 
 ## Instalar
 
@@ -43,12 +44,11 @@ python -c "import subprocess, sys, tomllib; p = tomllib.load(open('pyproject.tom
 
 ## Ejecutar
 
-Configura el token compartido con Core y la policy de Ruta A:
+Configura el token compartido con Core:
 
 ```powershell
 # Windows / PowerShell
 $env:PANGO_PREDICTION_SERVICE_TOKEN = Read-Host 'Token del servicio'
-$env:PANGO_PREDICTION_POLICY_PATH = 'config/model_policy.json'
 python -m uvicorn pango_prediction.main:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
@@ -56,7 +56,6 @@ python -m uvicorn pango_prediction.main:create_app --factory --host 127.0.0.1 --
 # Linux / macOS (bash)
 read -r -s -p 'Token del servicio: ' PANGO_PREDICTION_SERVICE_TOKEN
 export PANGO_PREDICTION_SERVICE_TOKEN
-export PANGO_PREDICTION_POLICY_PATH=config/model_policy.json
 python -m uvicorn pango_prediction.main:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
@@ -66,14 +65,23 @@ añade `--reload` al comando de Uvicorn.
 | Variable | Comportamiento |
 |---|---|
 | `PANGO_PREDICTION_SERVICE_TOKEN` | Obligatoria. Credencial de servicio compartida con Core. |
-| `PANGO_PREDICTION_POLICY_PATH` | Selecciona la policy. Sin ella se carga `config/development_policy.json`. |
 | `PANGO_PREDICTION_MAX_SERIES_PER_REQUEST` | Límite por petición; predeterminado: `500`. |
 | `PANGO_PREDICTION_LOG_LEVEL` | Nivel de logs; predeterminado: `INFO`. |
 
-La policy entregada es **`ruta-a-baseline-v1-inactive`**: inactivas sin pronóstico;
-el resto usa `moving_average(window=4)`. Una ruta de policy explícita inválida
-impide el arranque. Las variables se leen del entorno; el servicio no carga
-un archivo `.env` automáticamente.
+En esta rama el servicio no carga una policy. Para cada serie compara los
+modelos locales `zero`, `naive`, `moving_average(window=4)` y SBA mediante dos
+cortes temporales expansivos del mismo horizonte. Los adaptadores StatsForecast
+no se ejecutan en línea para evitar que la evaluación por petición aumente
+desproporcionadamente su latencia. El ganador se elige por rango promedio de
+WAPE, sesgo absoluto, MAE y MASE. Se necesitan al menos dos bloques evaluables;
+si no existen, la serie devuelve `INSUFFICIENT_HISTORY`.
+`policy_version` permanece en la respuesta por compatibilidad y vale `null`;
+`model_name` identifica el ganador.
+
+Esta selección es experimental: el repositorio no incluye el historial real de
+Ruta A y sus fixtures solo verifican el flujo, no cuál modelo generaliza mejor.
+No se modificaron los criterios congelados de Ruta A. Las variables se leen del
+entorno; el servicio no carga un archivo `.env` automáticamente.
 
 ## Comprobar la API
 
@@ -94,14 +102,13 @@ $response = Invoke-RestMethod -Uri http://127.0.0.1:8000/v1/forecasts -Method Po
 $response | ConvertTo-Json -Depth 100
 ```
 
-Comprueba que `policy_version` sea `ruta-a-baseline-v1-inactive`. Los endpoints
+Comprueba `model_name` y que `policy_version` sea `null`. Los endpoints
 `POST /v1/forecasts` y `POST /v1/forecast-evaluations` requieren
 `Authorization: Bearer <token>`.
 
 Core debe declarar contrato **`1.2`** para recibir `no_forecast` y enviar
 `warehouses[]` con `warehouse_id` y `holds_stock`: un almacén omitido se trata
-como de stock. MA4 con menos de cinco semanas observables todavía devuelve
-`MODEL_FAILED`. Consulta el [contrato HTTP](docs/contract-v1.md) para los detalles.
+como de stock. Consulta el [contrato HTTP](docs/contract-v1.md) para los detalles.
 
 ## Docker
 
@@ -109,10 +116,10 @@ Requiere Docker activo. Con el token ya exportado en la terminal:
 
 ```text
 docker build -f docker/Dockerfile.api -t pango-prediction .
-docker run --rm -p 127.0.0.1:8000:8000 -e PANGO_PREDICTION_SERVICE_TOKEN -e PANGO_PREDICTION_POLICY_PATH=/app/config/model_policy.json pango-prediction
+docker run --rm -p 127.0.0.1:8000:8000 -e PANGO_PREDICTION_SERVICE_TOKEN pango-prediction
 ```
 
-La imagen CPU incluye la policy y StatsForecast; no instala el runtime DeepAR.
+La imagen CPU incluye StatsForecast; no instala el runtime DeepAR.
 
 ## Controles de desarrollo
 

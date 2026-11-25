@@ -55,23 +55,23 @@ def test_health_needs_no_credential(client: TestClient) -> None:
     }
 
 
-# --- the horizon belongs to the policy ---
+# --- the horizon is evaluated against historical folds ---
 
 
 @pytest.mark.parametrize("horizon", [1, 8])
-def test_a_horizon_other_than_the_policys_is_a_bad_request(
+def test_a_supported_horizon_is_used_by_model_selection(
     client: TestClient, horizon: int
 ) -> None:
-    """Refused whole, not per series: the fault is in the request itself."""
+    """Without a policy, model evaluation follows the requested horizon."""
     payload = load_fixture()
     payload["horizon"] = horizon
 
     response = client.post("/v1/forecasts", json=payload, headers=AUTH)
 
-    assert response.status_code == 400
-    detail = response.json()["detail"]
-    assert str(horizon) in detail
-    assert "4" in detail
+    assert response.status_code == 200
+    for result in response.json()["results"]:
+        if result["status"] == "ok":
+            assert len(result["periods"]) == horizon
 
 
 # --- service-to-service authentication (plan B16) ---
@@ -131,12 +131,12 @@ def test_the_envelope_echoes_the_request_identifiers(client: TestClient) -> None
     assert body["forecast_run_id"] == payload["forecast_run_id"]
 
 
-def test_development_policy_version_is_reported(
+def test_no_policy_version_is_reported_for_internal_model_selection(
     client: TestClient,
 ) -> None:
     response = client.post("/v1/forecasts", json=load_fixture(), headers=AUTH)
 
-    assert response.json()["policy_version"] == "development-1"
+    assert response.json()["policy_version"] is None
 
 
 def test_every_series_gets_a_result_in_request_order(client: TestClient) -> None:
@@ -165,7 +165,7 @@ def test_the_invalid_series_fails_on_its_own(client: TestClient) -> None:
     assert "negative" in invalid["error"]["message"]
 
 
-def test_valid_series_are_forecast_when_the_development_policy_matches(
+def test_valid_series_are_forecast_with_the_backtest_winner(
     client: TestClient,
 ) -> None:
     response = client.post("/v1/forecasts", json=load_fixture(), headers=AUTH)
@@ -180,12 +180,28 @@ def test_valid_series_are_forecast_when_the_development_policy_matches(
         assert by_id[series_id]["total"]["estimate"] == pytest.approx(
             sum(period["estimate"] for period in by_id[series_id]["periods"])
         )
-        assert by_id[series_id]["model_name"] == "naive"
+        assert by_id[series_id]["model_name"] in {
+            "zero",
+            "naive",
+            "moving_average",
+            "sba",
+        }
+        assert (
+            by_id[series_id]["model_version"]
+            == "rolling-origin-average-rank-v1"
+        )
 
-    for series_id in (1255, 1403):
-        assert by_id[series_id]["error"]["code"] == "MODEL_NOT_AVAILABLE"
-        assert by_id[series_id]["periods"] == []
-        assert by_id[series_id]["total"] is None
+    assert by_id[1255]["status"] == "ok"
+    assert by_id[1255]["model_name"] in {
+        "zero",
+        "naive",
+        "moving_average",
+        "sba",
+    }
+
+    assert by_id[1403]["error"]["code"] == "INSUFFICIENT_HISTORY"
+    assert by_id[1403]["periods"] == []
+    assert by_id[1403]["total"] is None
 
 
 def test_availability_findings_travel_as_warnings(client: TestClient) -> None:
@@ -396,7 +412,8 @@ def test_a_profile_travels_alongside_the_error(client: TestClient) -> None:
     ]
 
     assert both
-    assert all(result["error"]["code"] == "MODEL_NOT_AVAILABLE" for result in both)
+    assert [result["series_id"] for result in both] == [1403]
+    assert all(result["error"]["code"] == "INSUFFICIENT_HISTORY" for result in both)
 
 
 def test_the_horizon_covariate_has_one_value_per_forecast_week(
@@ -524,7 +541,7 @@ def test_a_request_is_logged_with_the_contract_fields(
     assert logged["series_count"] == len(payload["series"])
     assert logged["status"] == "partial"
     assert logged["duration_ms"] >= 0
-    assert logged["policy_version"] == "development-1"
+    assert logged["policy_version"] is None
 
 
 def test_the_log_carries_no_part_of_the_payload(
